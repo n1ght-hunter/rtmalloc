@@ -1,0 +1,643 @@
+//! Allocator benchmarks comparing rstcmalloc vs system allocator vs mimalloc vs google tcmalloc.
+//!
+//! Since #[global_allocator] is process-wide and cannot be switched at runtime,
+//! each allocator is tested via its raw GlobalAlloc interface directly.
+//!
+//! After criterion finishes, a colored comparison table is printed.
+
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::hint::black_box;
+
+use mimalloc::MiMalloc;
+use rstcmalloc::TcMalloc;
+
+// ---------------------------------------------------------------------------
+// Google tcmalloc FFI (statically linked when available)
+// ---------------------------------------------------------------------------
+
+#[cfg(has_google_tcmalloc)]
+mod google_tc {
+    use std::alloc::{GlobalAlloc, Layout};
+
+    #[link(name = "tcmalloc_minimal", kind = "static")]
+    #[link(name = "common", kind = "static")]
+    #[link(name = "low_level_alloc", kind = "static")]
+    unsafe extern "C" {
+        fn tc_malloc(size: usize) -> *mut u8;
+        fn tc_free(ptr: *mut u8);
+        fn tc_realloc(ptr: *mut u8, size: usize) -> *mut u8;
+        fn tc_memalign(align: usize, size: usize) -> *mut u8;
+    }
+
+    pub struct GoogleTcMalloc;
+
+    unsafe impl GlobalAlloc for GoogleTcMalloc {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            if layout.align() <= 8 {
+                unsafe { tc_malloc(layout.size()) }
+            } else {
+                unsafe { tc_memalign(layout.align(), layout.size()) }
+            }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
+            unsafe { tc_free(ptr) }
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, _layout: Layout, new_size: usize) -> *mut u8 {
+            unsafe { tc_realloc(ptr, new_size) }
+        }
+    }
+
+    unsafe impl Sync for GoogleTcMalloc {}
+    unsafe impl Send for GoogleTcMalloc {}
+}
+
+#[cfg(has_google_tcmalloc)]
+use google_tc::GoogleTcMalloc;
+
+static TCMALLOC: TcMalloc = TcMalloc;
+static MIMALLOC: MiMalloc = MiMalloc;
+#[cfg(has_google_tcmalloc)]
+static GOOGLE_TC: GoogleTcMalloc = GoogleTcMalloc;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+unsafe fn alloc_dealloc(allocator: &dyn GlobalAlloc, layout: Layout) {
+    let ptr = unsafe { allocator.alloc(layout) };
+    assert!(!ptr.is_null());
+    unsafe { allocator.dealloc(ptr, layout) };
+}
+
+unsafe fn alloc_n_then_free(allocator: &dyn GlobalAlloc, layout: Layout, n: usize) {
+    let mut ptrs = Vec::with_capacity(n);
+    for _ in 0..n {
+        let ptr = unsafe { allocator.alloc(layout) };
+        assert!(!ptr.is_null());
+        ptrs.push(ptr);
+    }
+    for ptr in ptrs.into_iter().rev() {
+        unsafe { allocator.dealloc(ptr, layout) };
+    }
+}
+
+unsafe fn churn(allocator: &dyn GlobalAlloc, layout: Layout, rounds: usize) {
+    let mut live: Vec<*mut u8> = Vec::new();
+    for _ in 0..rounds {
+        for _ in 0..10 {
+            let ptr = unsafe { allocator.alloc(layout) };
+            assert!(!ptr.is_null());
+            live.push(ptr);
+        }
+        let drain = live.len() / 2;
+        for _ in 0..drain {
+            let ptr = live.pop().unwrap();
+            unsafe { allocator.dealloc(ptr, layout) };
+        }
+    }
+    for ptr in live {
+        unsafe { allocator.dealloc(ptr, layout) };
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Benchmarks
+// ---------------------------------------------------------------------------
+
+fn bench_single_alloc_dealloc(c: &mut Criterion) {
+    let sizes: &[usize] = &[8, 64, 256, 1024, 4096, 65536];
+    let mut group = c.benchmark_group("single_alloc_dealloc");
+    group.sample_size(50);
+
+    for &size in sizes {
+        let layout = Layout::from_size_align(size, 8).unwrap();
+        group.throughput(Throughput::Elements(1));
+
+        group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&System, layout) })
+        });
+        group.bench_with_input(BenchmarkId::new("rstcmalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&TCMALLOC, layout) })
+        });
+        group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&MIMALLOC, layout) })
+        });
+        #[cfg(has_google_tcmalloc)]
+        group.bench_with_input(BenchmarkId::new("google_tc", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&GOOGLE_TC, layout) })
+        });
+    }
+    group.finish();
+}
+
+fn bench_batch_alloc_free(c: &mut Criterion) {
+    let sizes: &[usize] = &[8, 64, 512, 4096];
+    let n = 1000;
+    let mut group = c.benchmark_group("batch_1000");
+    group.sample_size(30);
+
+    for &size in sizes {
+        let layout = Layout::from_size_align(size, 8).unwrap();
+        group.throughput(Throughput::Elements(n as u64));
+
+        group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&System, layout, n) })
+        });
+        group.bench_with_input(BenchmarkId::new("rstcmalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC, layout, n) })
+        });
+        group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&MIMALLOC, layout, n) })
+        });
+        #[cfg(has_google_tcmalloc)]
+        group.bench_with_input(BenchmarkId::new("google_tc", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&GOOGLE_TC, layout, n) })
+        });
+    }
+    group.finish();
+}
+
+fn bench_churn(c: &mut Criterion) {
+    let sizes: &[usize] = &[32, 256, 2048];
+    let rounds = 200;
+    let mut group = c.benchmark_group("churn");
+    group.sample_size(30);
+
+    for &size in sizes {
+        let layout = Layout::from_size_align(size, 8).unwrap();
+        group.throughput(Throughput::Elements(rounds as u64 * 10));
+
+        group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&System, layout, rounds) })
+        });
+        group.bench_with_input(BenchmarkId::new("rstcmalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&TCMALLOC, layout, rounds) })
+        });
+        group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&MIMALLOC, layout, rounds) })
+        });
+        #[cfg(has_google_tcmalloc)]
+        group.bench_with_input(BenchmarkId::new("google_tc", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&GOOGLE_TC, layout, rounds) })
+        });
+    }
+    group.finish();
+}
+
+fn bench_vec_push(c: &mut Criterion) {
+    let mut group = c.benchmark_group("vec_growth");
+    let final_len: usize = 10_000;
+    group.throughput(Throughput::Elements(final_len as u64));
+    group.sample_size(50);
+
+    fn simulate_vec_growth(allocator: &dyn GlobalAlloc, n: usize) {
+        let elem = std::mem::size_of::<u64>();
+        let mut cap = 1usize;
+        let mut layout = Layout::from_size_align(cap * elem, 8).unwrap();
+        let mut ptr = unsafe { allocator.alloc(layout) };
+        assert!(!ptr.is_null());
+
+        let mut len = 0;
+        while len < n {
+            len += 1;
+            if len > cap {
+                let new_cap = cap * 2;
+                let new_layout = Layout::from_size_align(new_cap * elem, 8).unwrap();
+                let new_ptr = unsafe { allocator.realloc(ptr, layout, new_cap * elem) };
+                assert!(!new_ptr.is_null());
+                ptr = new_ptr;
+                layout = new_layout;
+                cap = new_cap;
+            }
+        }
+        unsafe { allocator.dealloc(ptr, layout) };
+    }
+
+    group.bench_function("system", |b| {
+        b.iter(|| simulate_vec_growth(&System, black_box(final_len)))
+    });
+    group.bench_function("rstcmalloc", |b| {
+        b.iter(|| simulate_vec_growth(&TCMALLOC, black_box(final_len)))
+    });
+    group.bench_function("mimalloc", |b| {
+        b.iter(|| simulate_vec_growth(&MIMALLOC, black_box(final_len)))
+    });
+    #[cfg(has_google_tcmalloc)]
+    group.bench_function("google_tc", |b| {
+        b.iter(|| simulate_vec_growth(&GOOGLE_TC, black_box(final_len)))
+    });
+
+    group.finish();
+}
+
+fn bench_multithreaded(c: &mut Criterion) {
+    let mut group = c.benchmark_group("multithread_4t");
+    let ops_per_thread = 5000usize;
+    let nthreads = 4;
+    group.throughput(Throughput::Elements((ops_per_thread * nthreads) as u64));
+    group.sample_size(20);
+
+    fn mt_workload<A: GlobalAlloc + Sync>(allocator: &'static A, nthreads: usize, ops: usize) {
+        let layout = Layout::from_size_align(64, 8).unwrap();
+        let handles: Vec<_> = (0..nthreads)
+            .map(|_| {
+                std::thread::spawn(move || {
+                    let mut ptrs: Vec<*mut u8> = Vec::with_capacity(100);
+                    for _ in 0..ops {
+                        let ptr = unsafe { allocator.alloc(layout) };
+                        assert!(!ptr.is_null());
+                        ptrs.push(ptr);
+                        if ptrs.len() > 50 {
+                            for _ in 0..25 {
+                                let p = ptrs.pop().unwrap();
+                                unsafe { allocator.dealloc(p, layout) };
+                            }
+                        }
+                    }
+                    for p in ptrs {
+                        unsafe { allocator.dealloc(p, layout) };
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+
+    static SYS: System = System;
+
+    group.bench_function("system", |b| {
+        b.iter(|| mt_workload(&SYS, nthreads, ops_per_thread))
+    });
+    group.bench_function("rstcmalloc", |b| {
+        b.iter(|| mt_workload(&TCMALLOC, nthreads, ops_per_thread))
+    });
+    group.bench_function("mimalloc", |b| {
+        b.iter(|| mt_workload(&MIMALLOC, nthreads, ops_per_thread))
+    });
+    #[cfg(has_google_tcmalloc)]
+    group.bench_function("google_tc", |b| {
+        b.iter(|| mt_workload(&GOOGLE_TC, nthreads, ops_per_thread))
+    });
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_single_alloc_dealloc,
+    bench_batch_alloc_free,
+    bench_churn,
+    bench_vec_push,
+    bench_multithreaded,
+);
+
+// ---------------------------------------------------------------------------
+// Colored summary table — reads criterion's saved estimates after benches run
+// ---------------------------------------------------------------------------
+
+mod summary {
+    use std::collections::BTreeMap;
+    use std::path::Path;
+
+    const RESET: &str = "\x1b[0m";
+    const BOLD: &str = "\x1b[1m";
+    const DIM: &str = "\x1b[2m";
+    const WHITE: &str = "\x1b[37m";
+    const GREEN: &str = "\x1b[32m";
+    const CYAN: &str = "\x1b[36m";
+    const YELLOW: &str = "\x1b[33m";
+    const BG_GREEN: &str = "\x1b[42m\x1b[30m";
+
+    const KNOWN: &[&str] = &["system", "rstcmalloc", "mimalloc", "google_tc"];
+
+    fn color_for(name: &str) -> &'static str {
+        match name {
+            "system" => WHITE,
+            "rstcmalloc" => GREEN,
+            "mimalloc" => CYAN,
+            "google_tc" => YELLOW,
+            _ => WHITE,
+        }
+    }
+
+    fn format_time(ns: f64) -> String {
+        if ns >= 1_000_000.0 {
+            format!("{:>8.2} ms", ns / 1_000_000.0)
+        } else if ns >= 1_000.0 {
+            format!("{:>8.2} us", ns / 1_000.0)
+        } else {
+            format!("{:>8.1} ns", ns)
+        }
+    }
+
+    /// Read the point estimate (median ns) from criterion's saved JSON.
+    fn read_estimate(path: &Path) -> Option<f64> {
+        let data = std::fs::read_to_string(path.join("new").join("estimates.json")).ok()?;
+        // Simple JSON parsing — find "median" -> "point_estimate"
+        let median_pos = data.find("\"median\"")?;
+        let after_median = &data[median_pos..];
+        let pe_pos = after_median.find("\"point_estimate\"")?;
+        let after_pe = &after_median[pe_pos + "\"point_estimate\"".len()..];
+        let colon = after_pe.find(':')?;
+        let after_colon = after_pe[colon + 1..].trim_start();
+        let end = after_colon.find([',', '}'])?;
+        after_colon[..end].trim().parse::<f64>().ok()
+    }
+
+    /// Scan criterion output dir and print colored summary.
+    ///
+    /// Criterion saves estimates as:
+    ///   target/criterion/<group>/<allocator>/<param>/new/estimates.json   (with param)
+    ///   target/criterion/<group>/<allocator>/new/estimates.json           (without param)
+    pub fn print_summary() {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("target")
+            .join("criterion");
+        if !base.exists() {
+            return;
+        }
+
+        // Collect: group -> param -> allocator -> ns
+        let mut groups: BTreeMap<String, BTreeMap<String, Vec<(String, f64)>>> = BTreeMap::new();
+
+        let Ok(group_dirs) = std::fs::read_dir(&base) else { return };
+        for group_entry in group_dirs.flatten() {
+            let group_name = group_entry.file_name().to_string_lossy().to_string();
+            if group_name == "report" || !group_entry.path().is_dir() {
+                continue;
+            }
+
+            let Ok(alloc_dirs) = std::fs::read_dir(group_entry.path()) else { continue };
+            for alloc_entry in alloc_dirs.flatten() {
+                let alloc_name = alloc_entry.file_name().to_string_lossy().to_string();
+                if alloc_name == "report" || !alloc_entry.path().is_dir() {
+                    continue;
+                }
+
+                // Check if this dir has a "new/" subdir directly (no param)
+                if alloc_entry.path().join("new").join("estimates.json").exists() {
+                    if let Some(ns) = read_estimate(&alloc_entry.path()) {
+                        groups
+                            .entry(group_name.clone())
+                            .or_default()
+                            .entry(String::new())
+                            .or_default()
+                            .push((alloc_name.clone(), ns));
+                    }
+                    continue;
+                }
+
+                // Otherwise, iterate param subdirs: <alloc>/<param>/new/estimates.json
+                let Ok(param_dirs) = std::fs::read_dir(alloc_entry.path()) else { continue };
+                for param_entry in param_dirs.flatten() {
+                    let param_name = param_entry.file_name().to_string_lossy().to_string();
+                    if param_name == "report" || !param_entry.path().is_dir() {
+                        continue;
+                    }
+
+                    if let Some(ns) = read_estimate(&param_entry.path()) {
+                        groups
+                            .entry(group_name.clone())
+                            .or_default()
+                            .entry(param_name)
+                            .or_default()
+                            .push((alloc_name.clone(), ns));
+                    }
+                }
+            }
+        }
+
+        if groups.is_empty() {
+            return;
+        }
+
+        let bar_width = 30;
+
+        println!();
+        println!("  {BOLD}========== Benchmark Summary =========={RESET}");
+        println!();
+        print!("  Legend: ");
+        print!("{WHITE}system{RESET}  ");
+        print!("{GREEN}rstcmalloc{RESET}  ");
+        print!("{CYAN}mimalloc{RESET}  ");
+        print!("{YELLOW}google_tc{RESET}");
+        println!();
+
+        for (group, params) in &groups {
+            println!();
+            println!("  {BOLD}{group}{RESET}");
+
+            for (param, results) in params {
+                // Filter to known allocators and sort fastest first
+                let mut results: Vec<_> = results
+                    .iter()
+                    .filter(|(name, _)| KNOWN.contains(&name.as_str()))
+                    .collect();
+                results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
+                if results.is_empty() {
+                    continue;
+                }
+
+                let label = if param.is_empty() {
+                    String::new()
+                } else {
+                    format!("  size={param}")
+                };
+                println!("  {DIM}---{label}{RESET}");
+
+                let best = results.iter().map(|(_, ns)| *ns).fold(f64::INFINITY, f64::min);
+                let worst = results.iter().map(|(_, ns)| *ns).fold(0.0f64, f64::max);
+
+                for (alloc, ns) in results {
+                    let color = color_for(alloc);
+                    let time = format_time(*ns);
+                    let ratio = if worst > 0.0 { ns / worst } else { 1.0 };
+                    let bar_len = ((ratio * bar_width as f64) as usize).max(1);
+                    let bar = "\u{2588}".repeat(bar_len);
+                    let pad = " ".repeat(bar_width - bar_len);
+
+                    let tag = if (*ns - best).abs() < 0.01 {
+                        format!(" {BG_GREEN} BEST {RESET}")
+                    } else {
+                        let slower = *ns / best;
+                        format!(" {DIM}{slower:.2}x{RESET}")
+                    };
+
+                    println!("  {color}{alloc:>12}{RESET}  {time}  {color}{bar}{RESET}{pad}{tag}");
+                }
+            }
+        }
+        println!();
+    }
+
+    /// Hex colors for SVG plots.
+    fn svg_color_for(name: &str) -> &'static str {
+        match name {
+            "system" => "#888888",    // gray
+            "rstcmalloc" => "#2ca02c", // green
+            "mimalloc" => "#17becf",   // cyan
+            "google_tc" => "#ff7f0e",  // orange
+            _ => "#1f78b4",            // default blue
+        }
+    }
+
+    /// Recolor criterion's violin SVGs so each allocator gets a distinct color.
+    ///
+    /// Violin SVGs have text labels like "group/allocator" at known y positions,
+    /// followed by polygon pairs at those same y positions. We parse the labels
+    /// to find allocator names, then replace fill colors on their polygons.
+    pub fn recolor_svgs() {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("target")
+            .join("criterion");
+
+        if !base.exists() {
+            return;
+        }
+
+        // Find all violin.svg files
+        fn visit(dir: &Path, svgs: &mut Vec<std::path::PathBuf>) {
+            let Ok(entries) = std::fs::read_dir(dir) else { return };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    visit(&path, svgs);
+                } else if path.file_name().map_or(false, |n| n == "violin.svg") {
+                    svgs.push(path);
+                }
+            }
+        }
+
+        let mut svgs = Vec::new();
+        visit(&base, &mut svgs);
+
+        for svg_path in &svgs {
+            let Ok(content) = std::fs::read_to_string(svg_path) else { continue };
+
+            // Parse: find text elements that reference allocator names and their y positions.
+            // Text elements look like: <text x="96" y="148" ...>group/allocator</text>
+            // Each allocator has 2 polygons at that y center.
+            //
+            // Strategy: extract (allocator_name, y_value) pairs from labels,
+            // then for each polygon, check which y-band it belongs to and recolor.
+
+            let mut label_y: Vec<(String, f64)> = Vec::new();
+
+            // Find labels: text elements containing known allocator names
+            let mut pos = 0;
+            while let Some(start) = content[pos..].find("<text ") {
+                let abs_start = pos + start;
+                let Some(end) = content[abs_start..].find("</text>") else { break };
+                let tag = &content[abs_start..abs_start + end + 7];
+
+                // Extract y attribute
+                if let Some(y_start) = tag.find(" y=\"") {
+                    let y_str = &tag[y_start + 4..];
+                    if let Some(y_end) = y_str.find('"') {
+                        if let Ok(y) = y_str[..y_end].parse::<f64>() {
+                            // Extract text content (trim whitespace from multi-line SVG)
+                            if let Some(gt) = tag.find('>') {
+                                let text = tag[gt + 1..tag.len() - 7].trim();
+                                // Labels: "group/alloc" or "group/alloc/param"
+                                let parts: Vec<&str> = text.split('/').collect();
+                                if parts.len() >= 2 {
+                                    let alloc_part = parts[1];
+                                    if KNOWN.contains(&alloc_part) {
+                                        label_y.push((alloc_part.to_string(), y));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                pos = abs_start + end + 7;
+            }
+
+            if label_y.is_empty() {
+                continue;
+            }
+
+            // Now recolor polygons. Each polygon has a y-center that matches a label y.
+            // Replace fill="#1F78B4" with the allocator's color based on y proximity.
+            let mut result = String::with_capacity(content.len());
+            let mut remaining = content.as_str();
+
+            while let Some(poly_start) = remaining.find("<polygon ") {
+                result.push_str(&remaining[..poly_start]);
+                let poly_tag_end = remaining[poly_start..].find("/>")
+                    .unwrap_or(remaining.len() - poly_start);
+                let poly_tag = &remaining[poly_start..poly_start + poly_tag_end + 2];
+
+                // Extract first y coordinate from points to determine which allocator
+                let recolored = if let Some(pts_start) = poly_tag.find("points=\"") {
+                    let pts = &poly_tag[pts_start + 8..];
+                    // First point is like "656,148 ..."
+                    let first_y = pts.split_whitespace().next()
+                        .and_then(|p| p.split(',').nth(1))
+                        .and_then(|y| y.parse::<f64>().ok());
+
+                    if let Some(y) = first_y {
+                        // Find closest label
+                        let closest = label_y.iter()
+                            .min_by(|a, b| {
+                                (a.1 - y).abs().partial_cmp(&(b.1 - y).abs()).unwrap()
+                            });
+
+                        if let Some((alloc, _)) = closest {
+                            let new_color = svg_color_for(alloc);
+                            poly_tag.replace("fill=\"#1F78B4\"", &format!("fill=\"{new_color}\""))
+                                .replace("fill=\"#1f78b4\"", &format!("fill=\"{new_color}\""))
+                        } else {
+                            poly_tag.to_string()
+                        }
+                    } else {
+                        poly_tag.to_string()
+                    }
+                } else {
+                    poly_tag.to_string()
+                };
+
+                result.push_str(&recolored);
+                remaining = &remaining[poly_start + poly_tag_end + 2..];
+            }
+            result.push_str(remaining);
+
+            let _ = std::fs::write(svg_path, result);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Custom main: run criterion, then print colored summary
+// ---------------------------------------------------------------------------
+
+fn main() {
+    // Run criterion benchmarks (respects CLI args like --bench, filters, etc.)
+    let mut criterion = Criterion::default().configure_from_args();
+    bench_single_alloc_dealloc(&mut criterion);
+    bench_batch_alloc_free(&mut criterion);
+    bench_churn(&mut criterion);
+    bench_vec_push(&mut criterion);
+    bench_multithreaded(&mut criterion);
+
+    // Recolor SVG plots so each allocator has a distinct color
+    summary::recolor_svgs();
+
+    // Print colored comparison table before criterion's final_summary (which may exit)
+    summary::print_summary();
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+
+    criterion.final_summary();
+}

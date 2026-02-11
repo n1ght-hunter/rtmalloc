@@ -1,14 +1,9 @@
+[workspace]
+members = [".", "bench"]
+
 [package]
 name = "rstcmalloc"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-
-[dev-dependencies]
-criterion = { version = "0.8.2", features = ["html_reports"] }
-mimalloc = "0.1"
-
-[[bench]]
-name = "alloc_bench"
-harness = false

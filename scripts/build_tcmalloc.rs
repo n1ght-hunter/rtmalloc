@@ -64,7 +64,6 @@ fn main() {
         .args([
             "-DCMAKE_BUILD_TYPE=Release",
             &format!("-DCMAKE_INSTALL_PREFIX={}", install.display()),
-            "-DGPERFTOOLS_BUILD_STATIC=ON",
             "-DBUILD_SHARED_LIBS=OFF",
             "-DBUILD_TESTING=OFF",
         ]));
