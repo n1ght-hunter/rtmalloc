@@ -4,7 +4,8 @@
       "WebSearch",
       "WebFetch(domain:google.github.io)",
       "Bash(cargo test:*)",
-      "Bash(cargo bench:*)"
+      "Bash(cargo bench:*)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }
