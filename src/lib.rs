@@ -1,9 +1,10 @@
-#![feature(thread_local)]
+#![no_std]
+#![cfg_attr(feature = "nightly", feature(thread_local))]
 
 //! rstcmalloc: A tcmalloc-style memory allocator for Rust.
 //!
 //! Implements Google's tcmalloc architecture with three tiers:
-//! - Thread-local caches (fast path, no locks)
+//! - Thread-local caches (fast path, no locks) — requires `nightly` feature
 //! - Central free lists (per-size-class locking)
 //! - Page heap (span management, OS interface)
 //!
@@ -13,6 +14,11 @@
 //! #[global_allocator]
 //! static GLOBAL: rstcmalloc::TcMalloc = rstcmalloc::TcMalloc;
 //! ```
+
+#[cfg(test)]
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 pub mod size_class;
 pub mod platform;

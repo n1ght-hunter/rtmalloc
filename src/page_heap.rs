@@ -306,6 +306,8 @@ impl PageHeap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::boxed::Box;
+    use alloc::vec::Vec;
     use crate::pagemap::PageMap;
 
     // Each test creates its own PageMap to avoid interference

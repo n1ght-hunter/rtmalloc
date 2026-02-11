@@ -133,6 +133,7 @@ impl<T> Drop for SpinMutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec::Vec;
     use std::sync::Arc;
 
     #[test]

@@ -144,6 +144,7 @@ impl TransferCacheArray {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::boxed::Box;
     use crate::page_heap::PageHeap;
     use crate::pagemap::PageMap;
 

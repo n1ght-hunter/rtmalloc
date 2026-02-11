@@ -224,6 +224,7 @@ pub unsafe fn dealloc_span(span: *mut Span) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec::Vec;
 
     #[test]
     fn test_alloc_dealloc_span() {

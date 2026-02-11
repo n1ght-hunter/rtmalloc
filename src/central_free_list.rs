@@ -338,8 +338,11 @@ impl CentralCache {
 
 #[cfg(test)]
 mod tests {
+    use std::boxed::Box;
+
     use super::*;
     use crate::pagemap::PageMap;
+    
 
     fn make_test_env() -> (&'static PageMap, SpinMutex<PageHeap>, CentralCache) {
         let pm = Box::leak(Box::new(PageMap::new()));
