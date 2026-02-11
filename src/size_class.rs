@@ -123,155 +123,159 @@ pub static SIZE_CLASSES: [SizeClassInfo; NUM_SIZE_CLASSES] = [
         batch_size: 32,
     },
     // Class 17-20: 64-byte increments (320 to 512)
+    // batch = min(65536/size, 32) per gperftools formula
     SizeClassInfo {
         size: 320,
         pages: 1,
-        batch_size: 16,
+        batch_size: 32,
     },
     SizeClassInfo {
         size: 384,
         pages: 1,
-        batch_size: 16,
+        batch_size: 32,
     },
     SizeClassInfo {
         size: 448,
         pages: 1,
-        batch_size: 16,
+        batch_size: 32,
     },
     SizeClassInfo {
         size: 512,
         pages: 1,
-        batch_size: 16,
+        batch_size: 32,
     },
     // Class 21-24: 128-byte increments (640 to 1024)
     SizeClassInfo {
         size: 640,
         pages: 1,
-        batch_size: 16,
+        batch_size: 32,
     },
     SizeClassInfo {
         size: 768,
         pages: 1,
-        batch_size: 16,
+        batch_size: 32,
     },
     SizeClassInfo {
         size: 896,
         pages: 1,
-        batch_size: 16,
+        batch_size: 32,
     },
     SizeClassInfo {
         size: 1024,
         pages: 1,
-        batch_size: 16,
+        batch_size: 32,
     },
     // Class 25-28: 256-byte increments (1280 to 2048)
+    // gperftools: pages=2, batch=32 for all of these
     SizeClassInfo {
         size: 1280,
-        pages: 1,
-        batch_size: 8,
+        pages: 2,
+        batch_size: 32,
     },
     SizeClassInfo {
         size: 1536,
-        pages: 1,
-        batch_size: 8,
+        pages: 2,
+        batch_size: 32,
     },
     SizeClassInfo {
         size: 1792,
-        pages: 1,
-        batch_size: 8,
+        pages: 2,
+        batch_size: 32,
     },
     SizeClassInfo {
         size: 2048,
-        pages: 1,
-        batch_size: 8,
+        pages: 2,
+        batch_size: 32,
     },
     // Class 29-32: 512-byte increments (2560 to 4096)
+    // batch = min(65536/size, 32); pages sized for >=8 obj/span
+    // (gperftools uses fewer pages but has transfer cache; we compensate)
     SizeClassInfo {
         size: 2560,
-        pages: 1,
-        batch_size: 4,
+        pages: 4,
+        batch_size: 25,
     },
     SizeClassInfo {
         size: 3072,
-        pages: 1,
-        batch_size: 4,
+        pages: 4,
+        batch_size: 21,
     },
     SizeClassInfo {
         size: 3584,
-        pages: 1,
-        batch_size: 4,
+        pages: 4,
+        batch_size: 18,
     },
     SizeClassInfo {
         size: 4096,
-        pages: 1,
-        batch_size: 4,
+        pages: 4,
+        batch_size: 16,
     },
     // Class 33-36: 1024-byte increments (5120 to 8192)
     SizeClassInfo {
         size: 5120,
-        pages: 1,
-        batch_size: 4,
+        pages: 5,
+        batch_size: 12,
     },
     SizeClassInfo {
         size: 6144,
-        pages: 1,
-        batch_size: 4,
+        pages: 6,
+        batch_size: 10,
     },
     SizeClassInfo {
         size: 7168,
-        pages: 1,
-        batch_size: 4,
+        pages: 7,
+        batch_size: 9,
     },
     SizeClassInfo {
         size: 8192,
-        pages: 1,
-        batch_size: 4,
+        pages: 8,
+        batch_size: 8,
     },
-    // Class 37-40: larger sizes, multiple pages
+    // Class 37-40: larger sizes
     SizeClassInfo {
         size: 10240,
-        pages: 2,
-        batch_size: 2,
+        pages: 10,
+        batch_size: 6,
     },
     SizeClassInfo {
         size: 12288,
-        pages: 2,
-        batch_size: 2,
+        pages: 12,
+        batch_size: 5,
     },
     SizeClassInfo {
         size: 16384,
-        pages: 2,
-        batch_size: 2,
+        pages: 16,
+        batch_size: 4,
     },
     SizeClassInfo {
         size: 20480,
-        pages: 3,
-        batch_size: 2,
+        pages: 20,
+        batch_size: 3,
     },
     // Class 41-45: large size classes
     SizeClassInfo {
         size: 32768,
-        pages: 4,
-        batch_size: 2,
-    },
-    SizeClassInfo {
-        size: 40960,
-        pages: 5,
-        batch_size: 2,
-    },
-    SizeClassInfo {
-        size: 65536,
-        pages: 8,
-        batch_size: 2,
-    },
-    SizeClassInfo {
-        size: 131072,
         pages: 16,
         batch_size: 2,
     },
     SizeClassInfo {
-        size: 262144,
+        size: 40960,
+        pages: 20,
+        batch_size: 2,
+    },
+    SizeClassInfo {
+        size: 65536,
         pages: 32,
+        batch_size: 2,
+    },
+    SizeClassInfo {
+        size: 131072,
+        pages: 32,
+        batch_size: 2,
+    },
+    SizeClassInfo {
+        size: 262144,
+        pages: 64,
         batch_size: 2,
     },
 ];
