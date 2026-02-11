@@ -117,13 +117,12 @@ impl CentralFreeList {
                     self.nonempty_spans.push(span);
                 }
 
-                // If span is completely free, return it to page heap
-                if (*span).allocated_count == 0 {
+                // If span is completely free, return it to page heap.
+                // Keep at least one span cached to avoid populate/return churn
+                // on single alloc+dealloc cycles.
+                if (*span).allocated_count == 0 && self.nonempty_spans.count > 1 {
                     self.nonempty_spans.remove(span);
-                    // Drain the freelist count
                     self.num_free -= (*span).total_count as usize;
-
-                    // Clear span fields before returning to page heap
                     (*span).freelist = ptr::null_mut();
                     page_heap.lock().deallocate_span(span);
                 }
@@ -278,7 +277,8 @@ pub unsafe fn insert_range_dropping_lock(
                     cfl.nonempty_spans.push(span);
                 }
 
-                if (*span).allocated_count == 0 {
+                // Keep at least one span cached to avoid populate/return churn
+                if (*span).allocated_count == 0 && cfl.nonempty_spans.count > 1 {
                     cfl.nonempty_spans.remove(span);
                     cfl.num_free -= (*span).total_count as usize;
                     (*span).freelist = ptr::null_mut();
@@ -287,7 +287,6 @@ pub unsafe fn insert_range_dropping_lock(
                         freed_spans[num_freed] = span;
                         num_freed += 1;
                     } else {
-                        // Rare overflow: deallocate while holding lock
                         page_heap.lock().deallocate_span(span);
                     }
                 }

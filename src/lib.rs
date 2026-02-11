@@ -17,7 +17,7 @@
 
 #[cfg(test)]
 extern crate alloc;
-#[cfg(test)]
+#[cfg(any(test, feature = "std"))]
 extern crate std;
 
 pub mod size_class;
@@ -42,7 +42,7 @@ pub use allocator::TcMalloc;
 
 // Panic handler for staticlib builds (no_std has no default panic handler).
 // Only active when panic="abort" (i.e., the `fast` profile), not during normal checks.
-#[cfg(all(feature = "ffi", not(test), panic = "abort"))]
+#[cfg(all(feature = "ffi", not(test), not(feature = "std"), panic = "abort"))]
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
     unsafe extern "C" {

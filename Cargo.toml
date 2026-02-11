@@ -12,10 +12,12 @@ crate-type = ["lib"]
 [features]
 default = []
 nightly = []
+std = []
 ffi = []
 testing = []
 
 [dependencies]
+cfg-if = "1"
 
 
 [profile.fast]

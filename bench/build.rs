@@ -13,18 +13,21 @@ fn main() {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
 
     // =========================================================================
-    // Build rstcmalloc as TWO staticlibs with the `fast` profile:
-    //   - nightly variant (thread cache):   --features nightly,ffi
-    //   - stable variant  (central cache):  --features ffi
+    // Build rstcmalloc as THREE staticlibs with the `fast` profile:
+    //   - nightly (#[thread_local] thread cache): --features nightly,ffi,testing
+    //   - std     (std::thread_local! cache):     --features std,ffi,testing
+    //   - nostd   (central cache only):           --features ffi,testing
     // =========================================================================
 
     build_variant(&cargo, &ws_root, &out_dir, "nightly,ffi,testing", "rstcmalloc_nightly");
-    build_variant(&cargo, &ws_root, &out_dir, "ffi,testing", "rstcmalloc_stable");
+    build_variant(&cargo, &ws_root, &out_dir, "std,ffi,testing", "rstcmalloc_std");
+    build_variant(&cargo, &ws_root, &out_dir, "ffi,testing", "rstcmalloc_nostd");
 
-    // Link both variants
+    // Link all three variants
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=static=rstcmalloc_nightly");
-    println!("cargo:rustc-link-lib=static=rstcmalloc_stable");
+    println!("cargo:rustc-link-lib=static=rstcmalloc_std");
+    println!("cargo:rustc-link-lib=static=rstcmalloc_nostd");
 
     // Windows: VirtualAlloc/VirtualFree live in kernel32
     #[cfg(windows)]

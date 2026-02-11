@@ -20,53 +20,49 @@ mod rstcmalloc_ffi {
     use std::alloc::{GlobalAlloc, Layout};
 
     unsafe extern "C" {
-        // Nightly variant (thread cache)
+        // Nightly variant (#[thread_local] thread cache)
         fn rstcmalloc_nightly_alloc(size: usize, align: usize) -> *mut u8;
         fn rstcmalloc_nightly_dealloc(ptr: *mut u8, size: usize, align: usize);
         fn rstcmalloc_nightly_realloc(ptr: *mut u8, size: usize, align: usize, new_size: usize) -> *mut u8;
 
-        // Stable variant (central cache only)
-        fn rstcmalloc_stable_alloc(size: usize, align: usize) -> *mut u8;
-        fn rstcmalloc_stable_dealloc(ptr: *mut u8, size: usize, align: usize);
-        fn rstcmalloc_stable_realloc(ptr: *mut u8, size: usize, align: usize, new_size: usize) -> *mut u8;
+        // Std variant (std::thread_local! thread cache)
+        fn rstcmalloc_std_alloc(size: usize, align: usize) -> *mut u8;
+        fn rstcmalloc_std_dealloc(ptr: *mut u8, size: usize, align: usize);
+        fn rstcmalloc_std_realloc(ptr: *mut u8, size: usize, align: usize, new_size: usize) -> *mut u8;
+
+        // Nostd variant (central cache only, no thread cache)
+        fn rstcmalloc_nostd_alloc(size: usize, align: usize) -> *mut u8;
+        fn rstcmalloc_nostd_dealloc(ptr: *mut u8, size: usize, align: usize);
+        fn rstcmalloc_nostd_realloc(ptr: *mut u8, size: usize, align: usize, new_size: usize) -> *mut u8;
     }
 
-    pub struct RstcmallocNightly;
+    macro_rules! impl_ffi_alloc {
+        ($name:ident, $alloc:ident, $dealloc:ident, $realloc:ident) => {
+            pub struct $name;
 
-    unsafe impl GlobalAlloc for RstcmallocNightly {
-        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            unsafe { rstcmalloc_nightly_alloc(layout.size(), layout.align()) }
-        }
-        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-            unsafe { rstcmalloc_nightly_dealloc(ptr, layout.size(), layout.align()) }
-        }
-        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-            unsafe { rstcmalloc_nightly_realloc(ptr, layout.size(), layout.align(), new_size) }
-        }
+            unsafe impl GlobalAlloc for $name {
+                unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+                    unsafe { $alloc(layout.size(), layout.align()) }
+                }
+                unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+                    unsafe { $dealloc(ptr, layout.size(), layout.align()) }
+                }
+                unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+                    unsafe { $realloc(ptr, layout.size(), layout.align(), new_size) }
+                }
+            }
+
+            unsafe impl Send for $name {}
+            unsafe impl Sync for $name {}
+        };
     }
 
-    unsafe impl Send for RstcmallocNightly {}
-    unsafe impl Sync for RstcmallocNightly {}
-
-    pub struct RstcmallocStable;
-
-    unsafe impl GlobalAlloc for RstcmallocStable {
-        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            unsafe { rstcmalloc_stable_alloc(layout.size(), layout.align()) }
-        }
-        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-            unsafe { rstcmalloc_stable_dealloc(ptr, layout.size(), layout.align()) }
-        }
-        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-            unsafe { rstcmalloc_stable_realloc(ptr, layout.size(), layout.align(), new_size) }
-        }
-    }
-
-    unsafe impl Send for RstcmallocStable {}
-    unsafe impl Sync for RstcmallocStable {}
+    impl_ffi_alloc!(RstcmallocNightly, rstcmalloc_nightly_alloc, rstcmalloc_nightly_dealloc, rstcmalloc_nightly_realloc);
+    impl_ffi_alloc!(RstcmallocStd, rstcmalloc_std_alloc, rstcmalloc_std_dealloc, rstcmalloc_std_realloc);
+    impl_ffi_alloc!(RstcmallocNostd, rstcmalloc_nostd_alloc, rstcmalloc_nostd_dealloc, rstcmalloc_nostd_realloc);
 }
 
-use rstcmalloc_ffi::{RstcmallocNightly, RstcmallocStable};
+use rstcmalloc_ffi::{RstcmallocNightly, RstcmallocNostd, RstcmallocStd};
 
 // ---------------------------------------------------------------------------
 // Google tcmalloc FFI (statically linked when available)
@@ -114,7 +110,8 @@ mod google_tc {
 use google_tc::GoogleTcMalloc;
 
 static TCMALLOC_NIGHTLY: RstcmallocNightly = RstcmallocNightly;
-static TCMALLOC_STABLE: RstcmallocStable = RstcmallocStable;
+static TCMALLOC_STD: RstcmallocStd = RstcmallocStd;
+static TCMALLOC_NOSTD: RstcmallocNostd = RstcmallocNostd;
 static MIMALLOC: MiMalloc = MiMalloc;
 #[cfg(has_google_tcmalloc)]
 static GOOGLE_TC: GoogleTcMalloc = GoogleTcMalloc;
@@ -179,8 +176,11 @@ fn bench_single_alloc_dealloc(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("rstc_nightly", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&TCMALLOC_NIGHTLY, layout) })
         });
-        group.bench_with_input(BenchmarkId::new("rstc_stable", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&TCMALLOC_STABLE, layout) })
+        group.bench_with_input(BenchmarkId::new("rstc_std", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&TCMALLOC_STD, layout) })
+        });
+        group.bench_with_input(BenchmarkId::new("rstc_nostd", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&TCMALLOC_NOSTD, layout) })
         });
         group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&MIMALLOC, layout) })
@@ -209,8 +209,11 @@ fn bench_batch_alloc_free(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("rstc_nightly", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC_NIGHTLY, layout, n) })
         });
-        group.bench_with_input(BenchmarkId::new("rstc_stable", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC_STABLE, layout, n) })
+        group.bench_with_input(BenchmarkId::new("rstc_std", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC_STD, layout, n) })
+        });
+        group.bench_with_input(BenchmarkId::new("rstc_nostd", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC_NOSTD, layout, n) })
         });
         group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&MIMALLOC, layout, n) })
@@ -239,8 +242,11 @@ fn bench_churn(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("rstc_nightly", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&TCMALLOC_NIGHTLY, layout, rounds) })
         });
-        group.bench_with_input(BenchmarkId::new("rstc_stable", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&TCMALLOC_STABLE, layout, rounds) })
+        group.bench_with_input(BenchmarkId::new("rstc_std", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&TCMALLOC_STD, layout, rounds) })
+        });
+        group.bench_with_input(BenchmarkId::new("rstc_nostd", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&TCMALLOC_NOSTD, layout, rounds) })
         });
         group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&MIMALLOC, layout, rounds) })
@@ -288,8 +294,11 @@ fn bench_vec_push(c: &mut Criterion) {
     group.bench_function("rstc_nightly", |b| {
         b.iter(|| simulate_vec_growth(&TCMALLOC_NIGHTLY, black_box(final_len)))
     });
-    group.bench_function("rstc_stable", |b| {
-        b.iter(|| simulate_vec_growth(&TCMALLOC_STABLE, black_box(final_len)))
+    group.bench_function("rstc_std", |b| {
+        b.iter(|| simulate_vec_growth(&TCMALLOC_STD, black_box(final_len)))
+    });
+    group.bench_function("rstc_nostd", |b| {
+        b.iter(|| simulate_vec_growth(&TCMALLOC_NOSTD, black_box(final_len)))
     });
     group.bench_function("mimalloc", |b| {
         b.iter(|| simulate_vec_growth(&MIMALLOC, black_box(final_len)))
@@ -345,8 +354,11 @@ fn bench_multithreaded(c: &mut Criterion) {
     group.bench_function("rstc_nightly", |b| {
         b.iter(|| mt_workload(&TCMALLOC_NIGHTLY, nthreads, ops_per_thread))
     });
-    group.bench_function("rstc_stable", |b| {
-        b.iter(|| mt_workload(&TCMALLOC_STABLE, nthreads, ops_per_thread))
+    group.bench_function("rstc_std", |b| {
+        b.iter(|| mt_workload(&TCMALLOC_STD, nthreads, ops_per_thread))
+    });
+    group.bench_function("rstc_nostd", |b| {
+        b.iter(|| mt_workload(&TCMALLOC_NOSTD, nthreads, ops_per_thread))
     });
     group.bench_function("mimalloc", |b| {
         b.iter(|| mt_workload(&MIMALLOC, nthreads, ops_per_thread))
@@ -386,14 +398,16 @@ mod summary {
     const BG_GREEN: &str = "\x1b[42m\x1b[30m";
 
     const MAGENTA: &str = "\x1b[35m";
+    const RED: &str = "\x1b[31m";
 
-    const KNOWN: &[&str] = &["system", "rstc_nightly", "rstc_stable", "mimalloc", "google_tc"];
+    const KNOWN: &[&str] = &["system", "rstc_nightly", "rstc_std", "rstc_nostd", "mimalloc", "google_tc"];
 
     fn color_for(name: &str) -> &'static str {
         match name {
             "system" => WHITE,
             "rstc_nightly" => GREEN,
-            "rstc_stable" => MAGENTA,
+            "rstc_std" => MAGENTA,
+            "rstc_nostd" => RED,
             "mimalloc" => CYAN,
             "google_tc" => YELLOW,
             _ => WHITE,
@@ -500,8 +514,9 @@ mod summary {
         println!();
         print!("  Legend: ");
         print!("{WHITE}system{RESET}  ");
-        print!("{GREEN}rstcmalloc_nightly{RESET}  ");
-        print!("{MAGENTA}rstcmalloc_stable{RESET}  ");
+        print!("{GREEN}rstc_nightly{RESET}  ");
+        print!("{MAGENTA}rstc_std{RESET}  ");
+        print!("{RED}rstc_nostd{RESET}  ");
         print!("{CYAN}mimalloc{RESET}  ");
         print!("{YELLOW}google_tc{RESET}");
         println!();
@@ -559,8 +574,9 @@ mod summary {
         match name {
             "system" => "#888888",           // gray
             "rstc_nightly" => "#2ca02c", // green
-            "rstc_stable" => "#9467bd",  // purple
-            "mimalloc" => "#17becf",           // cyan
+            "rstc_std" => "#9467bd",     // purple
+            "rstc_nostd" => "#d62728",   // red
+            "mimalloc" => "#17becf",     // cyan
             "google_tc" => "#ff7f0e",          // orange
             _ => "#1f78b4",                    // default blue
         }
