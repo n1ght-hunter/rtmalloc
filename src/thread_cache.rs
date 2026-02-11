@@ -128,6 +128,16 @@ pub struct ThreadCache {
 }
 
 impl ThreadCache {
+    /// Const-constructible ThreadCache with `max_size = 0` as "not initialized" sentinel.
+    /// Used with `#[thread_local]` for zero-cost TLS. Call `init()` before first use.
+    pub const fn new_const() -> Self {
+        Self {
+            lists: [const { FreeList::new() }; NUM_SIZE_CLASSES],
+            total_size: 0,
+            max_size: 0, // Sentinel: not yet initialized
+        }
+    }
+
     pub fn new() -> Self {
         // Claim initial budget from global pool
         UNCLAIMED_CACHE_SPACE.fetch_sub(MIN_PER_THREAD_CACHE_SIZE as isize, Ordering::Relaxed);
@@ -136,6 +146,51 @@ impl ThreadCache {
             lists: [const { FreeList::new() }; NUM_SIZE_CLASSES],
             total_size: 0,
             max_size: MIN_PER_THREAD_CACHE_SIZE,
+        }
+    }
+
+    /// Check if this thread cache has been initialized (max_size > 0).
+    #[inline(always)]
+    pub fn is_initialized(&self) -> bool {
+        self.max_size > 0
+    }
+
+    /// Initialize a const-constructed ThreadCache. Claims budget from global pool.
+    #[cold]
+    pub fn init(&mut self) {
+        UNCLAIMED_CACHE_SPACE.fetch_sub(MIN_PER_THREAD_CACHE_SIZE as isize, Ordering::Relaxed);
+        self.max_size = MIN_PER_THREAD_CACHE_SIZE;
+    }
+
+    /// Flush all cached objects back to the central cache and return budget.
+    /// Called on thread exit via the TcFlush guard.
+    pub unsafe fn flush_and_destroy(
+        &mut self,
+        transfer_cache: &TransferCacheArray,
+        central: &CentralCache,
+        page_heap: &SpinMutex<PageHeap>,
+        pagemap: &PageMap,
+    ) {
+        for cls in 1..NUM_SIZE_CLASSES {
+            let list = &mut self.lists[cls];
+            if list.length > 0 {
+                let info = size_class::class_info(cls);
+                let (count, head, tail) = list.pop_batch(list.length);
+                if count > 0 {
+                    self.total_size -= count as usize * info.size;
+                    unsafe {
+                        transfer_cache.insert_range(
+                            cls, head, tail, count as usize,
+                            central, page_heap, pagemap,
+                        )
+                    };
+                }
+            }
+        }
+        // Return budget to global pool
+        if self.max_size > 0 {
+            UNCLAIMED_CACHE_SPACE.fetch_add(self.max_size as isize, Ordering::Relaxed);
+            self.max_size = 0;
         }
     }
 
@@ -370,12 +425,9 @@ impl ThreadCache {
     }
 }
 
-impl Drop for ThreadCache {
-    fn drop(&mut self) {
-        // Return our budget to the global pool so other threads can use it.
-        UNCLAIMED_CACHE_SPACE.fetch_add(self.max_size as isize, Ordering::Relaxed);
-    }
-}
+// Note: Drop is NOT implemented. Thread cache cleanup is handled by
+// the TcFlush guard in allocator.rs which calls flush_and_destroy().
+// For ThreadCache::new() users (tests), budget leak is acceptable.
 
 #[cfg(test)]
 mod tests {

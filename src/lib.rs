@@ -1,3 +1,5 @@
+#![feature(thread_local)]
+
 //! rstcmalloc: A tcmalloc-style memory allocator for Rust.
 //!
 //! Implements Google's tcmalloc architecture with three tiers:
