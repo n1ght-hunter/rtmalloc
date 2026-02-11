@@ -45,19 +45,19 @@ impl CentralFreeList {
         page_heap: &SpinMutex<PageHeap>,
         pagemap: &PageMap,
     ) -> (usize, *mut FreeObject) {
-        if self.num_free == 0 {
-            // Need to fetch a new span
-            unsafe { self.populate(page_heap, pagemap) };
-            if self.num_free == 0 {
-                return (0, ptr::null_mut());
-            }
-        }
-
-        // Collect objects from spans
+        // Collect objects from spans, populating new spans as needed
         let mut head: *mut FreeObject = ptr::null_mut();
         let mut count = 0;
 
-        while count < batch_size && !self.nonempty_spans.is_empty() {
+        while count < batch_size {
+            // If we have no free objects, populate a new span
+            if self.nonempty_spans.is_empty() {
+                unsafe { self.populate(page_heap, pagemap) };
+                if self.nonempty_spans.is_empty() {
+                    break; // OOM or can't grow
+                }
+            }
+
             let span = self.nonempty_spans.head;
             unsafe {
                 while count < batch_size && !(*span).freelist.is_null() {

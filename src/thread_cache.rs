@@ -15,9 +15,11 @@ use core::ptr;
 /// Maximum total bytes a thread cache can hold before triggering GC.
 const MAX_THREAD_CACHE_SIZE: usize = 4 * 1024 * 1024; // 4 MiB
 
-/// Minimum total bytes a thread cache keeps (floor for shrinking).
-#[allow(dead_code)]
-const MIN_THREAD_CACHE_SIZE: usize = 512 * 1024; // 512 KiB
+/// Maximum dynamic free list length per size class.
+const MAX_DYNAMIC_FREE_LIST_LENGTH: u32 = 8192;
+
+/// Number of consecutive overages before shrinking max_length (gperftools: 3).
+const MAX_OVERAGES: u32 = 3;
 
 /// Per-size-class free list within the thread cache.
 struct FreeList {
@@ -27,6 +29,8 @@ struct FreeList {
     length: u32,
     /// Maximum length before we return objects to central cache.
     max_length: u32,
+    /// Consecutive overage count (for shrinking max_length).
+    length_overages: u32,
 }
 
 impl FreeList {
@@ -35,6 +39,7 @@ impl FreeList {
             head: ptr::null_mut(),
             length: 0,
             max_length: 1, // Start small, grows adaptively
+            length_overages: 0,
         }
     }
 
@@ -158,6 +163,9 @@ impl ThreadCache {
     }
 
     /// Slow path: fetch a batch of objects from the central free list.
+    ///
+    /// Uses slow-start: fetches min(max_length, batch_size) objects and
+    /// grows max_length on each slow-path call, matching Google tcmalloc.
     #[cold]
     unsafe fn fetch_from_central(
         &mut self,
@@ -168,12 +176,16 @@ impl ThreadCache {
     ) -> *mut u8 {
         let info = size_class::class_info(size_class);
         let batch = info.batch_size;
+        let list = &mut self.lists[size_class];
+
+        // Slow start: only fetch min(max_length, batch) objects
+        let num_to_move = (list.max_length as usize).min(batch).max(1);
 
         let (count, head) = unsafe {
             central
                 .get(size_class)
                 .lock()
-                .remove_range(batch, page_heap, pagemap)
+                .remove_range(num_to_move, page_heap, pagemap)
         };
 
         if count == 0 || head.is_null() {
@@ -187,21 +199,22 @@ impl ThreadCache {
 
         // Put the rest in our thread-local free list
         if remaining_count > 0 {
-            self.lists[size_class].push_batch(remaining_head, remaining_count as u32);
+            list.push_batch(remaining_head, remaining_count as u32);
             self.total_size += remaining_count * info.size;
         }
 
-        // Set max_length to accommodate the fetched batch so we don't
-        // immediately release everything back to central on the next dealloc.
-        let list = &mut self.lists[size_class];
-        if (list.max_length as usize) < count {
-            list.max_length = count as u32;
-        }
+        // Grow max_length: slow start then linear growth
+        Self::grow_max_length_on_fetch(list, batch);
 
         result as *mut u8
     }
 
     /// Release excess objects from a size class back to central cache.
+    ///
+    /// Matches Google tcmalloc's ListTooLong:
+    /// - Release exactly batch_size objects
+    /// - Slow start: grow max_length while < batch_size
+    /// - After that, track overages and shrink max_length after MAX_OVERAGES
     unsafe fn release_to_central(
         &mut self,
         size_class: usize,
@@ -210,10 +223,11 @@ impl ThreadCache {
         pagemap: &PageMap,
     ) {
         let info = size_class::class_info(size_class);
+        let batch = info.batch_size as u32;
         let list = &mut self.lists[size_class];
 
-        // Release half of the objects
-        let to_release = list.length / 2;
+        // Release exactly batch_size objects (or all if fewer)
+        let to_release = batch.min(list.length);
         if to_release == 0 {
             return;
         }
@@ -228,8 +242,34 @@ impl ThreadCache {
                 .insert_range(head, count as usize, page_heap, pagemap)
         };
 
-        // Shrink max_length if we keep overflowing
-        list.max_length = list.max_length.max(list.length);
+        // Adjust max_length per gperftools logic:
+        if list.max_length < batch {
+            // Slow start: grow by 1
+            list.max_length += 1;
+        } else if list.max_length > batch {
+            // Track overages: if we keep overflowing, shrink max_length
+            list.length_overages += 1;
+            if list.length_overages > MAX_OVERAGES {
+                list.max_length = list.max_length.saturating_sub(batch).max(batch);
+                list.length_overages = 0;
+            }
+        }
+    }
+
+    /// Grow max_length on fetch: slow-start then linear growth.
+    /// Matches gperftools FetchFromCentralCache growth logic.
+    #[inline]
+    fn grow_max_length_on_fetch(list: &mut FreeList, batch_size: usize) {
+        if (list.max_length as usize) < batch_size {
+            list.max_length += 1;
+        } else {
+            let batch = batch_size as u32;
+            let new_len = list.max_length + batch;
+            // Round down to multiple of batch_size (per gperftools)
+            let new_len = new_len - (new_len % batch);
+            list.max_length = new_len.min(MAX_DYNAMIC_FREE_LIST_LENGTH);
+        }
+        list.length_overages = 0;
     }
 
     /// GC: release objects across all size classes to bring total_size under max_size.
