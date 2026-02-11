@@ -6,8 +6,25 @@ name = "rstcmalloc"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["lib"]
+
 [features]
 default = []
 nightly = []
+ffi = []
+testing = []
 
 [dependencies]
+
+
+[profile.fast]
+inherits = "release"
+opt-level = 3     # Full optimization
+codegen-units = 1 # Maximum optimization, slower build time
+panic = 'abort'   # Reduce binary size, faster
+strip = true   
+incremental = false      # Ensures a "clean" global optimization every time
+overflow-checks = false  # Disable math overflow checks (standard for release, but good to be explicit)
+debug-assertions = false # Ensure these are off
+lto = "fat"              # "fat" is the most aggressive form of LTO

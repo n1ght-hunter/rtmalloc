@@ -5,7 +5,6 @@ edition = "2024"
 publish = false
 
 [dependencies]
-rstcmalloc = { path = "..", features = ["nightly"] }
 criterion = { version = "0.8.2", features = ["html_reports"] }
 mimalloc = "0.1"
 

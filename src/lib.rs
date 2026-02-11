@@ -30,6 +30,8 @@ pub mod central_free_list;
 pub mod transfer_cache;
 pub mod thread_cache;
 pub mod allocator;
+#[cfg(feature = "ffi")]
+pub mod ffi;
 
 /// Page size used by the allocator (8 KiB).
 pub const PAGE_SHIFT: usize = 13;
@@ -37,3 +39,14 @@ pub const PAGE_SIZE: usize = 1 << PAGE_SHIFT;
 
 // Re-export the allocator at crate root for convenience
 pub use allocator::TcMalloc;
+
+// Panic handler for staticlib builds (no_std has no default panic handler).
+// Only active when panic="abort" (i.e., the `fast` profile), not during normal checks.
+#[cfg(all(feature = "ffi", not(test), panic = "abort"))]
+#[panic_handler]
+fn panic(_: &core::panic::PanicInfo) -> ! {
+    unsafe extern "C" {
+        fn abort() -> !;
+    }
+    unsafe { abort() }
+}

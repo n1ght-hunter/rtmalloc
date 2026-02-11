@@ -3,6 +3,7 @@
 //! Since #[global_allocator] is process-wide and cannot be switched at runtime,
 //! each allocator is tested via its raw GlobalAlloc interface directly.
 //!
+//! rstcmalloc is linked as a staticlib (built with --profile fast by build.rs).
 //! After criterion finishes, a colored comparison table is printed.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
@@ -10,7 +11,62 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
 
 use mimalloc::MiMalloc;
-use rstcmalloc::TcMalloc;
+
+// ---------------------------------------------------------------------------
+// rstcmalloc FFI (statically linked, built by build.rs with --profile fast)
+// ---------------------------------------------------------------------------
+
+mod rstcmalloc_ffi {
+    use std::alloc::{GlobalAlloc, Layout};
+
+    unsafe extern "C" {
+        // Nightly variant (thread cache)
+        fn rstcmalloc_nightly_alloc(size: usize, align: usize) -> *mut u8;
+        fn rstcmalloc_nightly_dealloc(ptr: *mut u8, size: usize, align: usize);
+        fn rstcmalloc_nightly_realloc(ptr: *mut u8, size: usize, align: usize, new_size: usize) -> *mut u8;
+
+        // Stable variant (central cache only)
+        fn rstcmalloc_stable_alloc(size: usize, align: usize) -> *mut u8;
+        fn rstcmalloc_stable_dealloc(ptr: *mut u8, size: usize, align: usize);
+        fn rstcmalloc_stable_realloc(ptr: *mut u8, size: usize, align: usize, new_size: usize) -> *mut u8;
+    }
+
+    pub struct RstcmallocNightly;
+
+    unsafe impl GlobalAlloc for RstcmallocNightly {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            unsafe { rstcmalloc_nightly_alloc(layout.size(), layout.align()) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            unsafe { rstcmalloc_nightly_dealloc(ptr, layout.size(), layout.align()) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            unsafe { rstcmalloc_nightly_realloc(ptr, layout.size(), layout.align(), new_size) }
+        }
+    }
+
+    unsafe impl Send for RstcmallocNightly {}
+    unsafe impl Sync for RstcmallocNightly {}
+
+    pub struct RstcmallocStable;
+
+    unsafe impl GlobalAlloc for RstcmallocStable {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            unsafe { rstcmalloc_stable_alloc(layout.size(), layout.align()) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            unsafe { rstcmalloc_stable_dealloc(ptr, layout.size(), layout.align()) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            unsafe { rstcmalloc_stable_realloc(ptr, layout.size(), layout.align(), new_size) }
+        }
+    }
+
+    unsafe impl Send for RstcmallocStable {}
+    unsafe impl Sync for RstcmallocStable {}
+}
+
+use rstcmalloc_ffi::{RstcmallocNightly, RstcmallocStable};
 
 // ---------------------------------------------------------------------------
 // Google tcmalloc FFI (statically linked when available)
@@ -57,7 +113,8 @@ mod google_tc {
 #[cfg(has_google_tcmalloc)]
 use google_tc::GoogleTcMalloc;
 
-static TCMALLOC: TcMalloc = TcMalloc;
+static TCMALLOC_NIGHTLY: RstcmallocNightly = RstcmallocNightly;
+static TCMALLOC_STABLE: RstcmallocStable = RstcmallocStable;
 static MIMALLOC: MiMalloc = MiMalloc;
 #[cfg(has_google_tcmalloc)]
 static GOOGLE_TC: GoogleTcMalloc = GoogleTcMalloc;
@@ -119,8 +176,11 @@ fn bench_single_alloc_dealloc(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&System, layout) })
         });
-        group.bench_with_input(BenchmarkId::new("rstcmalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&TCMALLOC, layout) })
+        group.bench_with_input(BenchmarkId::new("rstc_nightly", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&TCMALLOC_NIGHTLY, layout) })
+        });
+        group.bench_with_input(BenchmarkId::new("rstc_stable", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&TCMALLOC_STABLE, layout) })
         });
         group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&MIMALLOC, layout) })
@@ -146,8 +206,11 @@ fn bench_batch_alloc_free(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&System, layout, n) })
         });
-        group.bench_with_input(BenchmarkId::new("rstcmalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC, layout, n) })
+        group.bench_with_input(BenchmarkId::new("rstc_nightly", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC_NIGHTLY, layout, n) })
+        });
+        group.bench_with_input(BenchmarkId::new("rstc_stable", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC_STABLE, layout, n) })
         });
         group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&MIMALLOC, layout, n) })
@@ -173,8 +236,11 @@ fn bench_churn(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&System, layout, rounds) })
         });
-        group.bench_with_input(BenchmarkId::new("rstcmalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&TCMALLOC, layout, rounds) })
+        group.bench_with_input(BenchmarkId::new("rstc_nightly", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&TCMALLOC_NIGHTLY, layout, rounds) })
+        });
+        group.bench_with_input(BenchmarkId::new("rstc_stable", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&TCMALLOC_STABLE, layout, rounds) })
         });
         group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&MIMALLOC, layout, rounds) })
@@ -219,8 +285,11 @@ fn bench_vec_push(c: &mut Criterion) {
     group.bench_function("system", |b| {
         b.iter(|| simulate_vec_growth(&System, black_box(final_len)))
     });
-    group.bench_function("rstcmalloc", |b| {
-        b.iter(|| simulate_vec_growth(&TCMALLOC, black_box(final_len)))
+    group.bench_function("rstc_nightly", |b| {
+        b.iter(|| simulate_vec_growth(&TCMALLOC_NIGHTLY, black_box(final_len)))
+    });
+    group.bench_function("rstc_stable", |b| {
+        b.iter(|| simulate_vec_growth(&TCMALLOC_STABLE, black_box(final_len)))
     });
     group.bench_function("mimalloc", |b| {
         b.iter(|| simulate_vec_growth(&MIMALLOC, black_box(final_len)))
@@ -273,8 +342,11 @@ fn bench_multithreaded(c: &mut Criterion) {
     group.bench_function("system", |b| {
         b.iter(|| mt_workload(&SYS, nthreads, ops_per_thread))
     });
-    group.bench_function("rstcmalloc", |b| {
-        b.iter(|| mt_workload(&TCMALLOC, nthreads, ops_per_thread))
+    group.bench_function("rstc_nightly", |b| {
+        b.iter(|| mt_workload(&TCMALLOC_NIGHTLY, nthreads, ops_per_thread))
+    });
+    group.bench_function("rstc_stable", |b| {
+        b.iter(|| mt_workload(&TCMALLOC_STABLE, nthreads, ops_per_thread))
     });
     group.bench_function("mimalloc", |b| {
         b.iter(|| mt_workload(&MIMALLOC, nthreads, ops_per_thread))
@@ -313,12 +385,15 @@ mod summary {
     const YELLOW: &str = "\x1b[33m";
     const BG_GREEN: &str = "\x1b[42m\x1b[30m";
 
-    const KNOWN: &[&str] = &["system", "rstcmalloc", "mimalloc", "google_tc"];
+    const MAGENTA: &str = "\x1b[35m";
+
+    const KNOWN: &[&str] = &["system", "rstc_nightly", "rstc_stable", "mimalloc", "google_tc"];
 
     fn color_for(name: &str) -> &'static str {
         match name {
             "system" => WHITE,
-            "rstcmalloc" => GREEN,
+            "rstc_nightly" => GREEN,
+            "rstc_stable" => MAGENTA,
             "mimalloc" => CYAN,
             "google_tc" => YELLOW,
             _ => WHITE,
@@ -425,7 +500,8 @@ mod summary {
         println!();
         print!("  Legend: ");
         print!("{WHITE}system{RESET}  ");
-        print!("{GREEN}rstcmalloc{RESET}  ");
+        print!("{GREEN}rstcmalloc_nightly{RESET}  ");
+        print!("{MAGENTA}rstcmalloc_stable{RESET}  ");
         print!("{CYAN}mimalloc{RESET}  ");
         print!("{YELLOW}google_tc{RESET}");
         println!();
@@ -481,11 +557,12 @@ mod summary {
     /// Hex colors for SVG plots.
     fn svg_color_for(name: &str) -> &'static str {
         match name {
-            "system" => "#888888",    // gray
-            "rstcmalloc" => "#2ca02c", // green
-            "mimalloc" => "#17becf",   // cyan
-            "google_tc" => "#ff7f0e",  // orange
-            _ => "#1f78b4",            // default blue
+            "system" => "#888888",           // gray
+            "rstc_nightly" => "#2ca02c", // green
+            "rstc_stable" => "#9467bd",  // purple
+            "mimalloc" => "#17becf",           // cyan
+            "google_tc" => "#ff7f0e",          // orange
+            _ => "#1f78b4",                    // default blue
         }
     }
 
