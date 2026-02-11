@@ -10,6 +10,7 @@ use crate::size_class;
 use crate::span::FreeObject;
 use crate::sync::SpinMutex;
 use crate::thread_cache::ThreadCache;
+use crate::transfer_cache::TransferCacheArray;
 use crate::PAGE_SHIFT;
 use crate::PAGE_SIZE;
 use core::alloc::{GlobalAlloc, Layout};
@@ -23,6 +24,7 @@ use std::cell::UnsafeCell;
 static PAGE_MAP: PageMap = PageMap::new();
 static PAGE_HEAP: SpinMutex<PageHeap> = SpinMutex::new(PageHeap::new(&PAGE_MAP));
 static CENTRAL_CACHE: CentralCache = CentralCache::new();
+static TRANSFER_CACHE: TransferCacheArray = TransferCacheArray::new();
 
 // =============================================================================
 // Thread-local cache
@@ -87,7 +89,7 @@ unsafe impl GlobalAlloc for TcMalloc {
 
             // Small allocation: try thread cache first
             if let Some(ptr) = with_thread_cache(|tc| unsafe {
-                tc.allocate(class, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
+                tc.allocate(class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
             }) {
                 return ptr;
             }
@@ -119,7 +121,7 @@ unsafe impl GlobalAlloc for TcMalloc {
         } else {
             // Small allocation: try thread cache
             if with_thread_cache(|tc| unsafe {
-                tc.deallocate(ptr, sc, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
+                tc.deallocate(ptr, sc, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
             })
             .is_some()
             {

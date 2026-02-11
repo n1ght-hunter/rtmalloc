@@ -8,7 +8,7 @@
 use crate::page_heap::PageHeap;
 use crate::pagemap::PageMap;
 use crate::size_class::{self, NUM_SIZE_CLASSES};
-use crate::span::{FreeObject, SpanList, SpanState};
+use crate::span::{FreeObject, Span, SpanList, SpanState};
 use crate::sync::SpinMutex;
 use crate::PAGE_SHIFT;
 use crate::PAGE_SIZE;
@@ -134,22 +134,24 @@ impl CentralFreeList {
     /// Fetch a new span from the page heap and carve it into objects.
     unsafe fn populate(&mut self, page_heap: &SpinMutex<PageHeap>, pagemap: &PageMap) {
         let info = size_class::class_info(self.size_class);
-        let obj_size = info.size;
-        let pages = info.pages;
-
-        let span = unsafe { page_heap.lock().allocate_span(pages) };
+        let span = unsafe { page_heap.lock().allocate_span(info.pages) };
         if span.is_null() {
             return;
         }
+        unsafe { self.inject_span(span, pagemap) };
+    }
+
+    /// Carve a pre-allocated span into objects and add to the nonempty list.
+    /// Called while holding the central lock.
+    unsafe fn inject_span(&mut self, span: *mut Span, pagemap: &PageMap) {
+        let info = size_class::class_info(self.size_class);
+        let obj_size = info.size;
 
         unsafe {
             (*span).size_class = self.size_class;
             (*span).state = SpanState::InUse;
-
-            // Register in pagemap (page_heap already did this, but update size_class)
             pagemap.register_span(span);
 
-            // Carve the span into objects
             let base = (*span).start_addr();
             let span_bytes = (*span).num_pages * PAGE_SIZE;
             let num_objects = span_bytes / obj_size;
@@ -157,7 +159,6 @@ impl CentralFreeList {
             (*span).total_count = num_objects as u32;
             (*span).allocated_count = 0;
 
-            // Thread objects into an intrusive free list
             let mut freelist: *mut FreeObject = ptr::null_mut();
             for i in (0..num_objects).rev() {
                 let obj = base.add(i * obj_size) as *mut FreeObject;
@@ -169,6 +170,135 @@ impl CentralFreeList {
             self.num_free += num_objects;
             self.nonempty_spans.push(span);
         }
+    }
+}
+
+// =============================================================================
+// Lock-dropping wrappers
+// =============================================================================
+
+/// Remove up to `batch_size` objects, dropping the central lock during page heap calls.
+///
+/// This prevents threads wanting the same size class from blocking while another
+/// thread waits for OS memory in VirtualAlloc/mmap.
+pub unsafe fn remove_range_dropping_lock(
+    cfl_lock: &SpinMutex<CentralFreeList>,
+    size_class: usize,
+    batch_size: usize,
+    page_heap: &SpinMutex<PageHeap>,
+    pagemap: &PageMap,
+) -> (usize, *mut FreeObject) {
+    let info = size_class::class_info(size_class);
+    let mut head: *mut FreeObject = ptr::null_mut();
+    let mut count = 0;
+
+    loop {
+        // Phase 1: Collect from existing spans (central lock held)
+        {
+            let mut cfl = cfl_lock.lock();
+
+            while count < batch_size && !cfl.nonempty_spans.is_empty() {
+                let span = cfl.nonempty_spans.head;
+                unsafe {
+                    while count < batch_size && !(*span).freelist.is_null() {
+                        let obj = (*span).freelist;
+                        (*span).freelist = (*obj).next;
+                        (*obj).next = head;
+                        head = obj;
+                        (*span).allocated_count += 1;
+                        count += 1;
+                        cfl.num_free -= 1;
+                    }
+                    if (*span).freelist.is_null() {
+                        cfl.nonempty_spans.remove(span);
+                    }
+                }
+            }
+
+            if count >= batch_size {
+                return (count, head);
+            }
+
+            // nonempty_spans empty -- need to populate
+            // Central lock drops here
+        }
+
+        // Phase 2: Allocate span from page heap (NO central lock held)
+        let span = unsafe { page_heap.lock().allocate_span(info.pages) };
+        if span.is_null() {
+            return (count, head); // OOM, return what we have
+        }
+
+        // Phase 3: Inject span under central lock
+        {
+            let mut cfl = cfl_lock.lock();
+            unsafe { cfl.inject_span(span, pagemap) };
+        }
+        // Loop back to collect from newly injected span
+    }
+}
+
+/// Insert objects back, dropping the central lock for page heap span deallocation.
+pub unsafe fn insert_range_dropping_lock(
+    cfl_lock: &SpinMutex<CentralFreeList>,
+    mut head: *mut FreeObject,
+    count: usize,
+    page_heap: &SpinMutex<PageHeap>,
+    pagemap: &PageMap,
+) {
+    const MAX_FREED: usize = 8;
+    let mut freed_spans: [*mut Span; MAX_FREED] = [ptr::null_mut(); MAX_FREED];
+    let mut num_freed = 0;
+
+    // Phase 1: Insert all objects (central lock held)
+    {
+        let mut cfl = cfl_lock.lock();
+        let mut remaining = count;
+
+        while !head.is_null() && remaining > 0 {
+            let obj = head;
+            unsafe { head = (*obj).next };
+            remaining -= 1;
+
+            let page_id = (obj as usize) >> PAGE_SHIFT;
+            let span = pagemap.get(page_id);
+            if span.is_null() {
+                continue;
+            }
+
+            unsafe {
+                let was_full = (*span).freelist.is_null();
+
+                (*obj).next = (*span).freelist;
+                (*span).freelist = obj;
+                (*span).allocated_count -= 1;
+                cfl.num_free += 1;
+
+                if was_full {
+                    cfl.nonempty_spans.push(span);
+                }
+
+                if (*span).allocated_count == 0 {
+                    cfl.nonempty_spans.remove(span);
+                    cfl.num_free -= (*span).total_count as usize;
+                    (*span).freelist = ptr::null_mut();
+
+                    if num_freed < MAX_FREED {
+                        freed_spans[num_freed] = span;
+                        num_freed += 1;
+                    } else {
+                        // Rare overflow: deallocate while holding lock
+                        page_heap.lock().deallocate_span(span);
+                    }
+                }
+            }
+        }
+    }
+    // Central lock dropped
+
+    // Phase 2: Return freed spans to page heap (NO central lock held)
+    for i in 0..num_freed {
+        unsafe { page_heap.lock().deallocate_span(freed_spans[i]) };
     }
 }
 

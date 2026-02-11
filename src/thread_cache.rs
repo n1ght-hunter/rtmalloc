@@ -10,16 +10,28 @@ use crate::pagemap::PageMap;
 use crate::size_class::{self, NUM_SIZE_CLASSES};
 use crate::span::FreeObject;
 use crate::sync::SpinMutex;
+use crate::transfer_cache::TransferCacheArray;
 use core::ptr;
+use core::sync::atomic::{AtomicIsize, Ordering};
 
-/// Maximum total bytes a thread cache can hold before triggering GC.
-const MAX_THREAD_CACHE_SIZE: usize = 4 * 1024 * 1024; // 4 MiB
+/// Overall thread cache budget shared across all threads (32 MiB).
+const OVERALL_THREAD_CACHE_SIZE: usize = 32 * 1024 * 1024;
+
+/// Minimum per-thread cache size (512 KiB).
+const MIN_PER_THREAD_CACHE_SIZE: usize = 512 * 1024;
+
+/// Amount to steal from global budget during scavenge (64 KiB).
+const STEAL_AMOUNT: usize = 64 * 1024;
 
 /// Maximum dynamic free list length per size class.
 const MAX_DYNAMIC_FREE_LIST_LENGTH: u32 = 8192;
 
 /// Number of consecutive overages before shrinking max_length (gperftools: 3).
 const MAX_OVERAGES: u32 = 3;
+
+/// Unclaimed cache budget available for thread caches to claim.
+/// Starts at OVERALL_THREAD_CACHE_SIZE; each thread claims/returns portions.
+static UNCLAIMED_CACHE_SPACE: AtomicIsize = AtomicIsize::new(OVERALL_THREAD_CACHE_SIZE as isize);
 
 /// Per-size-class free list within the thread cache.
 struct FreeList {
@@ -31,6 +43,9 @@ struct FreeList {
     max_length: u32,
     /// Consecutive overage count (for shrinking max_length).
     length_overages: u32,
+    /// Minimum length since last scavenge (low-water mark).
+    /// Objects above this level were never needed and are safe to release.
+    low_water_mark: u32,
 }
 
 impl FreeList {
@@ -40,6 +55,7 @@ impl FreeList {
             length: 0,
             max_length: 1, // Start small, grows adaptively
             length_overages: 0,
+            low_water_mark: 0,
         }
     }
 
@@ -49,6 +65,9 @@ impl FreeList {
         if !obj.is_null() {
             self.head = unsafe { (*obj).next };
             self.length -= 1;
+            if self.length < self.low_water_mark {
+                self.low_water_mark = self.length;
+            }
         }
         obj
     }
@@ -79,19 +98,23 @@ impl FreeList {
         self.length += count;
     }
 
-    /// Pop up to `count` objects into a linked list. Returns (actual_count, head).
-    fn pop_batch(&mut self, count: u32) -> (u32, *mut FreeObject) {
+    /// Pop up to `count` objects into a linked list. Returns (actual_count, head, tail).
+    fn pop_batch(&mut self, count: u32) -> (u32, *mut FreeObject, *mut FreeObject) {
         let mut head: *mut FreeObject = ptr::null_mut();
+        let mut tail: *mut FreeObject = ptr::null_mut();
         let mut popped = 0u32;
         while popped < count && !self.head.is_null() {
             let obj = self.head;
             self.head = unsafe { (*obj).next };
             unsafe { (*obj).next = head };
+            if tail.is_null() {
+                tail = obj; // First popped becomes tail after reversal
+            }
             head = obj;
             self.length -= 1;
             popped += 1;
         }
-        (popped, head)
+        (popped, head, tail)
     }
 }
 
@@ -106,10 +129,13 @@ pub struct ThreadCache {
 
 impl ThreadCache {
     pub fn new() -> Self {
+        // Claim initial budget from global pool
+        UNCLAIMED_CACHE_SPACE.fetch_sub(MIN_PER_THREAD_CACHE_SIZE as isize, Ordering::Relaxed);
+
         Self {
             lists: [const { FreeList::new() }; NUM_SIZE_CLASSES],
             total_size: 0,
-            max_size: MAX_THREAD_CACHE_SIZE,
+            max_size: MIN_PER_THREAD_CACHE_SIZE,
         }
     }
 
@@ -119,6 +145,7 @@ impl ThreadCache {
     pub unsafe fn allocate(
         &mut self,
         size_class: usize,
+        transfer_cache: &TransferCacheArray,
         central: &CentralCache,
         page_heap: &SpinMutex<PageHeap>,
         pagemap: &PageMap,
@@ -130,8 +157,8 @@ impl ThreadCache {
             self.total_size -= obj_size;
             return obj as *mut u8;
         }
-        // Slow path: fetch from central cache
-        unsafe { self.fetch_from_central(size_class, central, page_heap, pagemap) }
+        // Slow path: fetch from transfer cache / central cache
+        unsafe { self.fetch_from_central(size_class, transfer_cache, central, page_heap, pagemap) }
     }
 
     /// Deallocate an object of the given size class.
@@ -140,6 +167,7 @@ impl ThreadCache {
         &mut self,
         ptr: *mut u8,
         size_class: usize,
+        transfer_cache: &TransferCacheArray,
         central: &CentralCache,
         page_heap: &SpinMutex<PageHeap>,
         pagemap: &PageMap,
@@ -151,18 +179,18 @@ impl ThreadCache {
         let obj_size = size_class::class_to_size(size_class);
         self.total_size += obj_size;
 
-        // Check if we should return objects to central cache
+        // Check if we should return objects to transfer/central cache
         if list.length > list.max_length {
-            unsafe { self.release_to_central(size_class, central, page_heap, pagemap) };
+            unsafe { self.release_to_central(size_class, transfer_cache, central, page_heap, pagemap) };
         }
 
         // Check total cache size for GC
         if self.total_size > self.max_size {
-            unsafe { self.scavenge(central, page_heap, pagemap) };
+            unsafe { self.scavenge(transfer_cache, central, page_heap, pagemap) };
         }
     }
 
-    /// Slow path: fetch a batch of objects from the central free list.
+    /// Slow path: fetch a batch of objects from the transfer cache / central free list.
     ///
     /// Uses slow-start: fetches min(max_length, batch_size) objects and
     /// grows max_length on each slow-path call, matching Google tcmalloc.
@@ -170,6 +198,7 @@ impl ThreadCache {
     unsafe fn fetch_from_central(
         &mut self,
         size_class: usize,
+        transfer_cache: &TransferCacheArray,
         central: &CentralCache,
         page_heap: &SpinMutex<PageHeap>,
         pagemap: &PageMap,
@@ -182,10 +211,7 @@ impl ThreadCache {
         let num_to_move = (list.max_length as usize).min(batch).max(1);
 
         let (count, head) = unsafe {
-            central
-                .get(size_class)
-                .lock()
-                .remove_range(num_to_move, page_heap, pagemap)
+            transfer_cache.remove_range(size_class, num_to_move, central, page_heap, pagemap)
         };
 
         if count == 0 || head.is_null() {
@@ -209,7 +235,7 @@ impl ThreadCache {
         result as *mut u8
     }
 
-    /// Release excess objects from a size class back to central cache.
+    /// Release excess objects from a size class back to transfer/central cache.
     ///
     /// Matches Google tcmalloc's ListTooLong:
     /// - Release exactly batch_size objects
@@ -218,6 +244,7 @@ impl ThreadCache {
     unsafe fn release_to_central(
         &mut self,
         size_class: usize,
+        transfer_cache: &TransferCacheArray,
         central: &CentralCache,
         page_heap: &SpinMutex<PageHeap>,
         pagemap: &PageMap,
@@ -232,14 +259,14 @@ impl ThreadCache {
             return;
         }
 
-        let (count, head) = list.pop_batch(to_release);
+        let (count, head, tail) = list.pop_batch(to_release);
         self.total_size -= count as usize * info.size;
 
         unsafe {
-            central
-                .get(size_class)
-                .lock()
-                .insert_range(head, count as usize, page_heap, pagemap)
+            transfer_cache.insert_range(
+                size_class, head, tail, count as usize,
+                central, page_heap, pagemap,
+            )
         };
 
         // Adjust max_length per gperftools logic:
@@ -272,42 +299,81 @@ impl ThreadCache {
         list.length_overages = 0;
     }
 
-    /// GC: release objects across all size classes to bring total_size under max_size.
+    /// GC: release idle objects across all size classes.
+    ///
+    /// Uses low-water-mark scavenging (matches gperftools): only releases objects
+    /// above the minimum list length since the last scavenge. These objects were
+    /// never needed and are safe to release without causing re-fetches.
     unsafe fn scavenge(
         &mut self,
+        transfer_cache: &TransferCacheArray,
         central: &CentralCache,
         page_heap: &SpinMutex<PageHeap>,
         pagemap: &PageMap,
     ) {
-        // Target: bring total_size down to max_size / 2
-        let target = self.max_size / 2;
-
         for cls in 1..NUM_SIZE_CLASSES {
-            if self.total_size <= target {
-                break;
-            }
-
             let list = &mut self.lists[cls];
-            if list.length == 0 {
-                continue;
+            let lwm = list.low_water_mark;
+
+            if lwm > 0 {
+                // Release half the idle objects (above low-water mark)
+                let to_release = if lwm > 1 { lwm / 2 } else { 1 };
+
+                let info = size_class::class_info(cls);
+                let (count, head, tail) = list.pop_batch(to_release);
+                self.total_size -= count as usize * info.size;
+
+                unsafe {
+                    transfer_cache.insert_range(
+                        cls, head, tail, count as usize,
+                        central, page_heap, pagemap,
+                    )
+                };
             }
 
-            let info = size_class::class_info(cls);
-            let to_release = list.length / 2;
-            if to_release == 0 {
-                continue;
+            // Shrink max_length if it's grown beyond batch_size
+            let batch = size_class::class_info(cls).batch_size as u32;
+            if list.max_length > batch {
+                list.max_length = list.max_length.saturating_sub(batch).max(batch);
             }
 
-            let (count, head) = list.pop_batch(to_release);
-            self.total_size -= count as usize * info.size;
-
-            unsafe {
-                central
-                    .get(cls)
-                    .lock()
-                    .insert_range(head, count as usize, page_heap, pagemap)
-            };
+            // Reset low-water mark for next epoch
+            list.low_water_mark = list.length;
         }
+
+        // After scavenging, try to grow our budget so we don't scavenge as often.
+        // Active threads that allocate heavily will naturally grow their caches.
+        self.increase_cache_limit();
+    }
+
+    /// Try to steal budget from the global pool to grow this thread's cache.
+    /// Uses CAS to atomically claim STEAL_AMOUNT from unclaimed space.
+    fn increase_cache_limit(&mut self) {
+        loop {
+            let current = UNCLAIMED_CACHE_SPACE.load(Ordering::Relaxed);
+            if current < STEAL_AMOUNT as isize {
+                return; // Not enough budget available
+            }
+            match UNCLAIMED_CACHE_SPACE.compare_exchange_weak(
+                current,
+                current - STEAL_AMOUNT as isize,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    self.max_size += STEAL_AMOUNT;
+                    return;
+                }
+                Err(_) => continue, // Retry
+            }
+        }
+    }
+}
+
+impl Drop for ThreadCache {
+    fn drop(&mut self) {
+        // Return our budget to the global pool so other threads can use it.
+        UNCLAIMED_CACHE_SPACE.fetch_add(self.max_size as isize, Ordering::Relaxed);
     }
 }
 
@@ -316,90 +382,93 @@ mod tests {
     use super::*;
     use crate::page_heap::PageHeap;
     use crate::pagemap::PageMap;
+    use crate::transfer_cache::TransferCacheArray;
 
     fn make_test_env() -> (
         &'static PageMap,
         SpinMutex<PageHeap>,
         CentralCache,
+        TransferCacheArray,
     ) {
         let pm = Box::leak(Box::new(PageMap::new()));
         let heap = SpinMutex::new(PageHeap::new(pm));
         let cache = CentralCache::new();
-        (pm, heap, cache)
+        let xfer = TransferCacheArray::new();
+        (pm, heap, cache, xfer)
     }
 
     #[test]
     fn test_allocate_and_deallocate() {
-        let (pm, heap, central) = make_test_env();
+        let (pm, heap, central, xfer) = make_test_env();
         let mut tc = ThreadCache::new();
 
         unsafe {
             // Allocate a small object (size class 1 = 8 bytes)
-            let ptr = tc.allocate(1, &central, &heap, pm);
+            let ptr = tc.allocate(1, &xfer, &central, &heap, pm);
             assert!(!ptr.is_null());
 
             // Deallocate it
-            tc.deallocate(ptr, 1, &central, &heap, pm);
+            tc.deallocate(ptr, 1, &xfer, &central, &heap, pm);
         }
     }
 
     #[test]
     fn test_allocate_many() {
-        let (pm, heap, central) = make_test_env();
+        let (pm, heap, central, xfer) = make_test_env();
         let mut tc = ThreadCache::new();
 
         unsafe {
             let mut ptrs = Vec::new();
             // Allocate 1000 objects of size class 4 = 32 bytes
             for _ in 0..1000 {
-                let ptr = tc.allocate(4, &central, &heap, pm);
+                let ptr = tc.allocate(4, &xfer, &central, &heap, pm);
                 assert!(!ptr.is_null());
                 ptrs.push(ptr);
             }
             // Free them all
             for ptr in ptrs {
-                tc.deallocate(ptr, 4, &central, &heap, pm);
+                tc.deallocate(ptr, 4, &xfer, &central, &heap, pm);
             }
         }
     }
 
     #[test]
     fn test_mixed_sizes() {
-        let (pm, heap, central) = make_test_env();
+        let (pm, heap, central, xfer) = make_test_env();
         let mut tc = ThreadCache::new();
 
         unsafe {
             let mut allocs: Vec<(usize, *mut u8)> = Vec::new();
             for cls in [1, 4, 8, 12, 16, 20, 24] {
                 for _ in 0..50 {
-                    let ptr = tc.allocate(cls, &central, &heap, pm);
+                    let ptr = tc.allocate(cls, &xfer, &central, &heap, pm);
                     assert!(!ptr.is_null());
                     allocs.push((cls, ptr));
                 }
             }
             for (cls, ptr) in allocs {
-                tc.deallocate(ptr, cls, &central, &heap, pm);
+                tc.deallocate(ptr, cls, &xfer, &central, &heap, pm);
             }
         }
     }
 
     #[test]
     fn test_reuse_from_cache() {
-        let (pm, heap, central) = make_test_env();
+        let (pm, heap, central, xfer) = make_test_env();
         let mut tc = ThreadCache::new();
 
         unsafe {
             // Allocate and free to populate thread cache
-            let ptr1 = tc.allocate(2, &central, &heap, pm);
+            let ptr1 = tc.allocate(2, &xfer, &central, &heap, pm);
             assert!(!ptr1.is_null());
-            tc.deallocate(ptr1, 2, &central, &heap, pm);
+            tc.deallocate(ptr1, 2, &xfer, &central, &heap, pm);
 
             // Next allocation should come from thread cache (same pointer)
-            let ptr2 = tc.allocate(2, &central, &heap, pm);
+            let ptr2 = tc.allocate(2, &xfer, &central, &heap, pm);
             assert!(!ptr2.is_null());
             assert_eq!(ptr1, ptr2);
 
-            tc.deallocate(ptr2, 2, &central, &heap, pm);
+            tc.deallocate(ptr2, 2, &xfer, &central, &heap, pm);
         }
     }
 }

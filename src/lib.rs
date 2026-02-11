@@ -19,6 +19,7 @@ pub mod span;
 pub mod pagemap;
 pub mod page_heap;
 pub mod central_free_list;
+pub mod transfer_cache;
 pub mod thread_cache;
 pub mod allocator;
 
