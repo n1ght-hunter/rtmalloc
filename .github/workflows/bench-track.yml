@@ -40,6 +40,7 @@ jobs:
           name: rstcmalloc Benchmarks
           tool: 'customSmallerIsBetter'
           output-file-path: bench-results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           gh-pages-branch: gh-pages
           benchmark-data-dir-path: dev/bench
           auto-push: true
