@@ -30,6 +30,8 @@ pub mod central_free_list;
 pub mod transfer_cache;
 pub mod thread_cache;
 pub mod allocator;
+#[cfg(feature = "percpu")]
+pub mod cpu_cache;
 #[cfg(feature = "ffi")]
 pub mod ffi;
 
