@@ -1,9 +1,9 @@
 //! Span management: metadata for contiguous runs of pages, and a slab allocator
 //! for Span structs themselves.
 
+use crate::PAGE_SIZE;
 use crate::platform;
 use crate::sync::SpinMutex;
-use crate::PAGE_SIZE;
 use core::ptr;
 
 /// State of a span.

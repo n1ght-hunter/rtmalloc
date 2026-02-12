@@ -391,11 +391,7 @@ impl<const NUM_CLASSES: usize> PerCpuSlab<NUM_CLASSES> {
             );
         }
 
-        if success != 0 {
-            Some(())
-        } else {
-            None
-        }
+        if success != 0 { Some(()) } else { None }
     }
 
     // ── Batch operations (non-rseq, caller holds CPU affinity) ───────

@@ -21,11 +21,7 @@ unsafe extern "system" {
     ) -> *mut c_void;
 
     #[link_name = "VirtualFree"]
-    fn virtual_free(
-        lp_address: *mut c_void,
-        dw_size: usize,
-        dw_free_type: u32,
-    ) -> i32;
+    fn virtual_free(lp_address: *mut c_void, dw_size: usize, dw_free_type: u32) -> i32;
 }
 
 /// Round up to the next multiple of `align` (must be a power of 2).
@@ -57,12 +53,5 @@ pub unsafe fn page_decommit(ptr: *mut u8, size: usize) {
 }
 
 pub unsafe fn page_recommit(ptr: *mut u8, size: usize) {
-    unsafe {
-        virtual_alloc(
-            ptr as *mut c_void,
-            size,
-            MEM_COMMIT,
-            PAGE_READWRITE,
-        )
-    };
+    unsafe { virtual_alloc(ptr as *mut c_void, size, MEM_COMMIT, PAGE_READWRITE) };
 }

@@ -29,7 +29,11 @@ fn main() {
 
     // Large allocation (bypasses size classes, goes directly to page heap)
     let big = vec![0u8; 1024 * 1024]; // 1 MiB
-    println!("Large alloc: {} bytes, all zero = {}", big.len(), big.iter().all(|&b| b == 0));
+    println!(
+        "Large alloc: {} bytes, all zero = {}",
+        big.len(),
+        big.iter().all(|&b| b == 0)
+    );
 
     // Multi-threaded workload
     println!("\nMulti-threaded benchmark (8 threads, 100k allocs each):");

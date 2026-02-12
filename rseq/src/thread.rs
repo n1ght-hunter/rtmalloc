@@ -13,7 +13,7 @@
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::abi::{Rseq, RSEQ_CPU_ID_REGISTRATION_FAILED, RSEQ_CPU_ID_UNINITIALIZED};
+use crate::abi::{RSEQ_CPU_ID_REGISTRATION_FAILED, RSEQ_CPU_ID_UNINITIALIZED, Rseq};
 
 // ── glibc weak symbols ──────────────────────────────────────────────────────
 
@@ -334,4 +334,3 @@ impl RseqLocal {
         Some(unsafe { core::ptr::read_volatile(&(*p).mm_cid) })
     }
 }
-

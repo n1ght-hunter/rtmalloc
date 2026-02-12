@@ -41,7 +41,9 @@ fn isolated_65k_then_131k_no_write() {
 /// Full warmup (8..65536) then 131072, WITHOUT global_allocator
 #[test]
 fn isolated_full_warmup_then_131k() {
-    let sizes = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536];
+    let sizes = [
+        8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536,
+    ];
     for &size in &sizes {
         let layout = Layout::from_size_align(size, 1).unwrap();
         let ptr = unsafe { ALLOC.alloc(layout) };

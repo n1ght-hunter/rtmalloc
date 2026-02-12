@@ -7,7 +7,8 @@ use std::alloc::{GlobalAlloc, Layout};
 static ALLOC: TcMalloc = TcMalloc;
 
 // Pages=1 tests
-#[test] fn pages1_size8() {
+#[test]
+fn pages1_size8() {
     let l = Layout::from_size_align(8, 1).unwrap();
     let p = unsafe { ALLOC.alloc(l) };
     assert!(!p.is_null());
@@ -15,7 +16,8 @@ static ALLOC: TcMalloc = TcMalloc;
 }
 
 // Pages=2 tests
-#[test] fn pages2_size2048() {
+#[test]
+fn pages2_size2048() {
     let l = Layout::from_size_align(2048, 1).unwrap();
     let p = unsafe { ALLOC.alloc(l) };
     assert!(!p.is_null());
@@ -23,7 +25,8 @@ static ALLOC: TcMalloc = TcMalloc;
 }
 
 // Pages=4 tests
-#[test] fn pages4_size4096() {
+#[test]
+fn pages4_size4096() {
     let l = Layout::from_size_align(4096, 1).unwrap();
     let p = unsafe { ALLOC.alloc(l) };
     assert!(!p.is_null());
@@ -31,7 +34,8 @@ static ALLOC: TcMalloc = TcMalloc;
 }
 
 // Pages=5 tests
-#[test] fn pages5_size5120() {
+#[test]
+fn pages5_size5120() {
     let l = Layout::from_size_align(5120, 1).unwrap();
     let p = unsafe { ALLOC.alloc(l) };
     assert!(!p.is_null());
@@ -39,7 +43,8 @@ static ALLOC: TcMalloc = TcMalloc;
 }
 
 // Pages=6 tests
-#[test] fn pages6_size6144() {
+#[test]
+fn pages6_size6144() {
     let l = Layout::from_size_align(6144, 1).unwrap();
     let p = unsafe { ALLOC.alloc(l) };
     assert!(!p.is_null());
@@ -47,7 +52,8 @@ static ALLOC: TcMalloc = TcMalloc;
 }
 
 // Pages=7 tests
-#[test] fn pages7_size7168() {
+#[test]
+fn pages7_size7168() {
     let l = Layout::from_size_align(7168, 1).unwrap();
     let p = unsafe { ALLOC.alloc(l) };
     assert!(!p.is_null());
@@ -55,7 +61,8 @@ static ALLOC: TcMalloc = TcMalloc;
 }
 
 // Pages=8 tests
-#[test] fn pages8_size8192() {
+#[test]
+fn pages8_size8192() {
     let l = Layout::from_size_align(8192, 1).unwrap();
     let p = unsafe { ALLOC.alloc(l) };
     assert!(!p.is_null());
@@ -63,7 +70,8 @@ static ALLOC: TcMalloc = TcMalloc;
 }
 
 // Pages=10 tests
-#[test] fn pages10_size10240() {
+#[test]
+fn pages10_size10240() {
     let l = Layout::from_size_align(10240, 1).unwrap();
     let p = unsafe { ALLOC.alloc(l) };
     assert!(!p.is_null());
@@ -71,7 +79,8 @@ static ALLOC: TcMalloc = TcMalloc;
 }
 
 // Pages=12 tests
-#[test] fn pages12_size12288() {
+#[test]
+fn pages12_size12288() {
     let l = Layout::from_size_align(12288, 1).unwrap();
     let p = unsafe { ALLOC.alloc(l) };
     assert!(!p.is_null());
@@ -79,7 +88,8 @@ static ALLOC: TcMalloc = TcMalloc;
 }
 
 // Pages=16 tests
-#[test] fn pages16_size32768() {
+#[test]
+fn pages16_size32768() {
     let l = Layout::from_size_align(32768, 1).unwrap();
     let p = unsafe { ALLOC.alloc(l) };
     assert!(!p.is_null());
@@ -87,7 +97,8 @@ static ALLOC: TcMalloc = TcMalloc;
 }
 
 // Pages=20 tests
-#[test] fn pages20_size40960() {
+#[test]
+fn pages20_size40960() {
     let l = Layout::from_size_align(40960, 1).unwrap();
     let p = unsafe { ALLOC.alloc(l) };
     assert!(!p.is_null());
@@ -95,7 +106,8 @@ static ALLOC: TcMalloc = TcMalloc;
 }
 
 // Pages=32 tests
-#[test] fn pages32_size65536() {
+#[test]
+fn pages32_size65536() {
     let l = Layout::from_size_align(65536, 1).unwrap();
     let p = unsafe { ALLOC.alloc(l) };
     assert!(!p.is_null());

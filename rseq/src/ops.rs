@@ -166,11 +166,7 @@ pub unsafe fn percpu_store(rseq: *mut Rseq, array: *mut u64, value: u64) -> Opti
         );
     }
 
-    if success != 0 {
-        Some(cpu as u32)
-    } else {
-        None
-    }
+    if success != 0 { Some(cpu as u32) } else { None }
 }
 
 // ── percpu_add ───────────────────────────────────────────────────────────────
@@ -235,11 +231,7 @@ pub unsafe fn percpu_add(rseq: *mut Rseq, array: *mut u64, delta: u64) -> Option
         );
     }
 
-    if success != 0 {
-        Some(cpu as u32)
-    } else {
-        None
-    }
+    if success != 0 { Some(cpu as u32) } else { None }
 }
 
 // ── percpu_cmpxchg ───────────────────────────────────────────────────────────

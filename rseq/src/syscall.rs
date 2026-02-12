@@ -4,7 +4,7 @@
 
 use core::arch::asm;
 
-use crate::abi::{Rseq, RSEQ_FLAG_UNREGISTER, RSEQ_MIN_SIZE, RSEQ_SIG, SYS_RSEQ};
+use crate::abi::{RSEQ_FLAG_UNREGISTER, RSEQ_MIN_SIZE, RSEQ_SIG, Rseq, SYS_RSEQ};
 
 /// Issue the raw rseq syscall.
 ///
@@ -45,11 +45,7 @@ pub unsafe fn raw_rseq(rseq: *mut Rseq, len: u32, flags: i32, sig: u32) -> i64 {
 /// - The area must remain valid for the thread's lifetime (or until [`rseq_unregister`]).
 pub unsafe fn rseq_register(rseq: *mut Rseq) -> Result<(), i32> {
     let ret = unsafe { raw_rseq(rseq, RSEQ_MIN_SIZE, 0, RSEQ_SIG) };
-    if ret == 0 {
-        Ok(())
-    } else {
-        Err(ret as i32)
-    }
+    if ret == 0 { Ok(()) } else { Err(ret as i32) }
 }
 
 /// Unregister this thread's rseq area.
@@ -62,11 +58,7 @@ pub unsafe fn rseq_register(rseq: *mut Rseq) -> Result<(), i32> {
 /// - `rseq` must be the same pointer that was previously registered.
 pub unsafe fn rseq_unregister(rseq: *mut Rseq) -> Result<(), i32> {
     let ret = unsafe { raw_rseq(rseq, RSEQ_MIN_SIZE, RSEQ_FLAG_UNREGISTER, RSEQ_SIG) };
-    if ret == 0 {
-        Ok(())
-    } else {
-        Err(ret as i32)
-    }
+    if ret == 0 { Ok(()) } else { Err(ret as i32) }
 }
 
 // ── Errno helpers ────────────────────────────────────────────────────────────
