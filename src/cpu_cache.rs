@@ -146,6 +146,13 @@ pub unsafe fn alloc(
 ) -> *mut u8 {
     ensure_init();
 
+    // If slab init failed, go straight to central.
+    if !CPU_SLAB.get().is_initialized() {
+        return unsafe {
+            alloc_from_central(class, transfer_cache, central, page_heap, pagemap)
+        };
+    }
+
     let rseq_ptr = match RSEQ.rseq_ptr() {
         Some(p) => p,
         None => {
@@ -171,12 +178,15 @@ pub unsafe fn alloc(
     unsafe {
         refill(class, rseq_ptr, transfer_cache, central, page_heap, pagemap);
 
-        // After refill, pop should succeed.
-        loop {
-            if let Some(ptr) = CPU_SLAB.get().pop(rseq_ptr, class) {
-                return ptr;
-            }
+        // After refill, try to pop. If still empty (OOM or migration),
+        // fall back to central allocation.
+        if let Some(ptr) = CPU_SLAB.get().pop(rseq_ptr, class) {
+            return ptr;
         }
+        if let Some(ptr) = CPU_SLAB.get().pop(rseq_ptr, class) {
+            return ptr;
+        }
+        alloc_from_central(class, transfer_cache, central, page_heap, pagemap)
     }
 }
 
@@ -199,6 +209,14 @@ pub unsafe fn dealloc(
     pagemap: &PageMap,
 ) {
     ensure_init();
+
+    // If slab init failed, go straight to central.
+    if !CPU_SLAB.get().is_initialized() {
+        unsafe {
+            dealloc_to_central(ptr, class, transfer_cache, central, page_heap, pagemap)
+        };
+        return;
+    }
 
     let rseq_ptr = match RSEQ.rseq_ptr() {
         Some(p) => p,
@@ -226,11 +244,14 @@ pub unsafe fn dealloc(
     unsafe {
         drain(class, rseq_ptr, transfer_cache, central, page_heap, pagemap);
 
-        loop {
-            if CPU_SLAB.get().push(rseq_ptr, class, ptr).is_some() {
-                return;
-            }
+        // After drain, try to push. If still full (migration), fall back.
+        if CPU_SLAB.get().push(rseq_ptr, class, ptr).is_some() {
+            return;
         }
+        if CPU_SLAB.get().push(rseq_ptr, class, ptr).is_some() {
+            return;
+        }
+        dealloc_to_central(ptr, class, transfer_cache, central, page_heap, pagemap)
     }
 }
 
@@ -260,17 +281,40 @@ unsafe fn refill(
 
     // Walk the linked list and push each pointer into the slab.
     let mut node = head;
+    let mut pushed = 0usize;
     for _ in 0..count {
         if node.is_null() {
             break;
         }
         let next = unsafe { (*node).next };
-        // Push into slab. On rseq abort, just retry.
-        loop {
+        // Push into slab. Retry a few times for rseq aborts, then stop.
+        let mut ok = false;
+        for _ in 0..4 {
             if unsafe { CPU_SLAB.get().push(rseq_ptr, class, node as *mut u8) }.is_some() {
+                ok = true;
                 break;
             }
         }
+        if !ok {
+            // Slab full or persistent aborts — return remaining objects
+            // to the transfer cache. Re-link the unpushed tail.
+            unsafe { (*node).next = next };
+            let remaining = count - pushed;
+            // Find the tail of the remaining chain.
+            let mut tail = node;
+            let mut walk = next;
+            while !walk.is_null() {
+                tail = walk;
+                walk = unsafe { (*walk).next };
+            }
+            unsafe {
+                transfer_cache.insert_range(
+                    class, node, tail, remaining, central, page_heap, pagemap,
+                )
+            };
+            return;
+        }
+        pushed += 1;
         node = next;
     }
 }
