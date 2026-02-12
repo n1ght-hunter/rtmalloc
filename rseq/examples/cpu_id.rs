@@ -19,8 +19,6 @@ fn main() {
     println!("rseq example");
     println!("============\n");
 
-    // ── 1. Read CPU IDs ──────────────────────────────────────────────
-
     let cpu = RSEQ.with(|r| r.cpu_id());
     match cpu {
         Some(cpu) => println!("[main] cpu_id = {cpu}"),
@@ -56,8 +54,6 @@ fn main() {
         }
     });
     println!();
-
-    // ── 2. PerCpuSlab push/pop ───────────────────────────────────────
 
     println!("\nPerCpuSlab demo (tcmalloc-style per-CPU LIFO):");
 

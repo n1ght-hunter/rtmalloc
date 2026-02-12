@@ -36,8 +36,6 @@ thread_local! {
     static RSEQ: RseqLocal = const { RseqLocal::new() };
 }
 
-// ── Size class configuration ────────────────────────────────────────────────
-
 /// We model 3 size classes (index 0 is unused by convention):
 ///   class 1: 64-byte blocks
 ///   class 2: 128-byte blocks
@@ -53,8 +51,6 @@ const BATCH_SIZE: usize = 8;
 
 /// Per-CPU region: 2^12 = 4 KiB (plenty for this demo).
 const SHIFT: u32 = 12;
-
-// ── Central freelist (the slow path) ────────────────────────────────────────
 
 /// A simple Mutex-protected freelist per size class.
 /// In a real allocator this would be a more sophisticated structure
@@ -116,8 +112,6 @@ impl CentralFreeList {
         }
     }
 }
-
-// ── The per-CPU cache allocator ─────────────────────────────────────────────
 
 struct PerCpuAllocator {
     slab: PerCpuSlab<NUM_CLASSES>,
@@ -216,8 +210,6 @@ impl PerCpuAllocator {
     }
 }
 
-// ── Main ────────────────────────────────────────────────────────────────────
-
 fn main() {
     println!("Per-CPU cache allocator example");
     println!("===============================\n");
@@ -249,8 +241,6 @@ fn main() {
         central: CentralFreeList::new(),
     };
 
-    // ── Demo 1: Single-threaded alloc/free cycle ────────────────────────
-
     println!("--- Single-threaded alloc/free (class 1 = 64 bytes) ---\n");
 
     // Allocate 5 blocks.
@@ -280,8 +270,6 @@ fn main() {
         println!("  alloc[{i}] = {ptr:p}");
         allocator.free(1, ptr);
     }
-
-    // ── Demo 2: Multi-threaded alloc/free ───────────────────────────────
 
     println!("\n--- Multi-threaded alloc/free (4 threads x 100 ops) ---\n");
 

@@ -17,15 +17,11 @@ use core::arch::asm;
 
 use crate::abi::Rseq;
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
 /// Byte offset of `rseq_cs` within `struct Rseq`.
 const RSEQ_CS_OFFSET: u32 = 8;
 
 /// Byte offset of `cpu_id` within `struct Rseq`.
 const CPU_ID_OFFSET: u32 = 4;
-
-// ── percpu_load ──────────────────────────────────────────────────────────────
 
 /// Load a `u64` value from `array[cpu_id]`.
 ///
@@ -78,7 +74,6 @@ pub unsafe fn percpu_load(rseq: *mut Rseq, array: *const u64) -> Option<(u32, u6
             "mov {succ}, 1",
             "jmp 5f",
 
-            // ── abort handler ────────────────────────────────────────────
             ".long 0x53053053",                // RSEQ_SIG before abort_ip
             "6:",
             "mov qword ptr [{rseq} + {rseq_cs_off}], 0",
@@ -104,8 +99,6 @@ pub unsafe fn percpu_load(rseq: *mut Rseq, array: *const u64) -> Option<(u32, u6
         None
     }
 }
-
-// ── percpu_store ─────────────────────────────────────────────────────────────
 
 /// Store a `u64` value to `array[cpu_id]`.
 ///
@@ -168,8 +161,6 @@ pub unsafe fn percpu_store(rseq: *mut Rseq, array: *mut u64, value: u64) -> Opti
 
     if success != 0 { Some(cpu as u32) } else { None }
 }
-
-// ── percpu_add ───────────────────────────────────────────────────────────────
 
 /// Add `delta` to `array[cpu_id]` (u64 element).
 ///
@@ -234,8 +225,6 @@ pub unsafe fn percpu_add(rseq: *mut Rseq, array: *mut u64, delta: u64) -> Option
     if success != 0 { Some(cpu as u32) } else { None }
 }
 
-// ── percpu_cmpxchg ───────────────────────────────────────────────────────────
-
 /// Compare-and-exchange on `array[cpu_id]`.
 ///
 /// If `array[cpu_id] == expected`, stores `new` and returns
@@ -289,13 +278,11 @@ pub unsafe fn percpu_cmpxchg(
             "mov {succ}, 1",
             "jmp 5f",
 
-            // ── value mismatch (not an rseq abort) ──────────────────────
             "7:",
             "mov qword ptr [{rseq} + {rseq_cs_off}], 0",
             "xor {succ:e}, {succ:e}",
             "jmp 5f",
 
-            // ── rseq abort handler ───────────────────────────────────────
             ".long 0x53053053",
             "6:",
             "mov qword ptr [{rseq} + {rseq_cs_off}], 0",

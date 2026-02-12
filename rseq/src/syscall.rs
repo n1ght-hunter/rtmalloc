@@ -61,8 +61,6 @@ pub unsafe fn rseq_unregister(rseq: *mut Rseq) -> Result<(), i32> {
     if ret == 0 { Ok(()) } else { Err(ret as i32) }
 }
 
-// ── Errno helpers ────────────────────────────────────────────────────────────
-
 /// Linux syscall returns negative errno on failure.
 pub const ENOSYS: i32 = -38;
 pub const EBUSY: i32 = -16;

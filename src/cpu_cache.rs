@@ -43,8 +43,6 @@ impl SlabCell {
     }
 }
 
-// ── Constants ───────────────────────────────────────────────────────────────
-
 /// Log2 of per-CPU region size: 2^18 = 256 KiB per CPU.
 /// 46 classes × 32 slots × 8 bytes = ~11 KiB, well within 256 KiB.
 const SHIFT: u32 = 18;
@@ -52,13 +50,9 @@ const SHIFT: u32 = 18;
 /// `_SC_NPROCESSORS_CONF` on Linux x86_64.
 const _SC_NPROCESSORS_CONF: i32 = 83;
 
-// ── Extern ──────────────────────────────────────────────────────────────────
-
 unsafe extern "C" {
     fn sysconf(name: i32) -> isize;
 }
-
-// ── Global state ────────────────────────────────────────────────────────────
 
 /// The per-CPU slab. Starts uninitialized (null slabs pointer).
 /// After `ensure_init()`, all CPUs have valid headers.
@@ -71,12 +65,8 @@ static SLAB_REGION: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
 /// Protects one-time initialization.
 static INIT_LOCK: SpinMutex<()> = SpinMutex::new(());
 
-// ── Per-thread rseq handle ──────────────────────────────────────────────────
-
 #[thread_local]
 static RSEQ: RseqLocal = RseqLocal::new();
-
-// ── Initialization ──────────────────────────────────────────────────────────
 
 /// Ensure the per-CPU slab is initialized. After the first call, this is
 /// just a single atomic load (fast path).
@@ -128,8 +118,6 @@ fn init_slow() {
     // Publish: all subsequent ensure_init() calls see non-null and skip.
     SLAB_REGION.store(region, Ordering::Release);
 }
-
-// ── Fast path ───────────────────────────────────────────────────────────────
 
 /// Allocate an object of the given size class via the per-CPU cache.
 ///
@@ -253,8 +241,6 @@ pub unsafe fn dealloc(
     }
 }
 
-// ── Slow paths ──────────────────────────────────────────────────────────────
-
 /// Refill the per-CPU slab from the transfer cache / central free list.
 ///
 /// Fetches a batch of objects and pushes them into the slab.
@@ -361,8 +347,6 @@ unsafe fn drain(
         };
     }
 }
-
-// ── Fallback (rseq unavailable) ─────────────────────────────────────────────
 
 /// Allocate directly from the transfer/central cache (rseq not available).
 #[cold]

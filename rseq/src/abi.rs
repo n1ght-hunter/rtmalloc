@@ -3,32 +3,22 @@
 //! Defines the structures shared between userspace and the kernel for
 //! restartable sequences (rseq). These must match the kernel's layout exactly.
 
-// ── Syscall ──────────────────────────────────────────────────────────────────
-
 /// rseq syscall number on x86_64.
 pub const SYS_RSEQ: u64 = 334;
 
-// ── Registration flags (passed to syscall `flags` parameter) ─────────────────
-
 /// Unregister the current thread's rseq area.
 pub const RSEQ_FLAG_UNREGISTER: i32 = 1 << 0;
-
-// ── Signature ────────────────────────────────────────────────────────────────
 
 /// x86_64 rseq abort signature. Must appear as the 4 bytes immediately
 /// before every abort handler IP. Encodes as `ud1 %edi, %eax` which is
 /// a guaranteed-illegal instruction, providing control-flow integrity.
 pub const RSEQ_SIG: u32 = 0x53053053;
 
-// ── CPU ID sentinel values ───────────────────────────────────────────────────
-
 /// cpu_id value before the kernel first schedules the thread.
 pub const RSEQ_CPU_ID_UNINITIALIZED: u32 = u32::MAX; // -1 as u32
 
 /// cpu_id value if registration failed.
 pub const RSEQ_CPU_ID_REGISTRATION_FAILED: u32 = u32::MAX - 1; // -2 as u32
-
-// ── Critical section flags (rseq_cs::flags) ──────────────────────────────────
 
 /// Don't restart the critical section on preemption.
 pub const RSEQ_CS_FLAG_NO_RESTART_ON_PREEMPT: u32 = 1 << 0;
@@ -38,8 +28,6 @@ pub const RSEQ_CS_FLAG_NO_RESTART_ON_SIGNAL: u32 = 1 << 1;
 
 /// Don't restart the critical section on CPU migration.
 pub const RSEQ_CS_FLAG_NO_RESTART_ON_MIGRATE: u32 = 1 << 2;
-
-// ── Struct offsets (for use in inline asm) ───────────────────────────────────
 
 /// Byte offset of `cpu_id_start` within `struct rseq`.
 pub const RSEQ_OFF_CPU_ID_START: u32 = 0;
@@ -58,8 +46,6 @@ pub const RSEQ_OFF_NODE_ID: u32 = 20;
 
 /// Byte offset of `mm_cid` within `struct rseq`.
 pub const RSEQ_OFF_MM_CID: u32 = 24;
-
-// ── struct rseq ──────────────────────────────────────────────────────────────
 
 /// Per-thread rseq area shared with the kernel.
 ///
@@ -119,8 +105,6 @@ impl Rseq {
         }
     }
 }
-
-// ── struct rseq_cs ───────────────────────────────────────────────────────────
 
 /// Critical section descriptor.
 ///

@@ -26,8 +26,6 @@ use core::ptr;
 
 use crate::abi::Rseq;
 
-// ── Header layout ────────────────────────────────────────────────────────────
-
 /// Byte offset of `cpu_id` within `struct Rseq`.
 const RSEQ_CPU_ID_OFF: u32 = 4;
 
@@ -48,8 +46,6 @@ pub struct SlabHeader {
     pub current: u16,
     pub end: u16,
 }
-
-// ── PerCpuSlab ───────────────────────────────────────────────────────────────
 
 /// Per-CPU slab allocator with LIFO stacks per size class.
 ///
@@ -189,8 +185,6 @@ impl<const NUM_CLASSES: usize> PerCpuSlab<NUM_CLASSES> {
         }
     }
 
-    // ── Push / Pop via rseq ──────────────────────────────────────────
-
     /// Pop a pointer from `class` on the current CPU.
     ///
     /// Returns `Some(ptr)` on success, `None` if the class is empty or
@@ -226,7 +220,6 @@ impl<const NUM_CLASSES: usize> PerCpuSlab<NUM_CLASSES> {
                 "lea {tmp}, [rip + 77b]",
                 "mov qword ptr [{rseq} + {rseq_cs_off}], {tmp}",
 
-                // ── start of critical section ────────────────────────
                 "3:",
 
                 // Read cpu_id, compute region base = slabs + (cpu << shift)
@@ -251,18 +244,15 @@ impl<const NUM_CLASSES: usize> PerCpuSlab<NUM_CLASSES> {
                 "mov word ptr [{base} + {class_off}], {cur:x}",
                 "4:",
 
-                // ── post-commit cleanup ──────────────────────────────
                 "mov qword ptr [{rseq} + {rseq_cs_off}], 0",
                 "mov {succ}, 1",
                 "jmp 5f",
 
-                // ── empty: class has no objects ──────────────────────
                 "7:",
                 "mov qword ptr [{rseq} + {rseq_cs_off}], 0",
                 "xor {succ:e}, {succ:e}",
                 "jmp 5f",
 
-                // ── abort handler ────────────────────────────────────
                 ".long 0x53053053",
                 "6:",
                 "mov qword ptr [{rseq} + {rseq_cs_off}], 0",
@@ -327,7 +317,6 @@ impl<const NUM_CLASSES: usize> PerCpuSlab<NUM_CLASSES> {
                 "lea {tmp}, [rip + 77b]",
                 "mov qword ptr [{rseq} + {rseq_cs_off}], {tmp}",
 
-                // ── start of critical section ────────────────────────
                 "3:",
 
                 // Read cpu_id, compute region base
@@ -357,18 +346,15 @@ impl<const NUM_CLASSES: usize> PerCpuSlab<NUM_CLASSES> {
                 "mov word ptr [{base} + {class_off}], {hdr:x}",
                 "4:",
 
-                // ── post-commit cleanup ──────────────────────────────
                 "mov qword ptr [{rseq} + {rseq_cs_off}], 0",
                 "mov {succ}, 1",
                 "jmp 5f",
 
-                // ── full: class has no room ──────────────────────────
                 "7:",
                 "mov qword ptr [{rseq} + {rseq_cs_off}], 0",
                 "xor {succ:e}, {succ:e}",
                 "jmp 5f",
 
-                // ── abort handler ────────────────────────────────────
                 ".long 0x53053053",
                 "6:",
                 "mov qword ptr [{rseq} + {rseq_cs_off}], 0",
@@ -394,8 +380,6 @@ impl<const NUM_CLASSES: usize> PerCpuSlab<NUM_CLASSES> {
 
         if success != 0 { Some(()) } else { None }
     }
-
-    // ── Batch operations (non-rseq, caller holds CPU affinity) ───────
 
     /// Pop up to `count` pointers from `class` on a specific `cpu`.
     ///

@@ -15,8 +15,6 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::abi::{RSEQ_CPU_ID_REGISTRATION_FAILED, RSEQ_CPU_ID_UNINITIALIZED, Rseq};
 
-// ── glibc weak symbols ──────────────────────────────────────────────────────
-
 // These symbols are exported by glibc >= 2.35 when it auto-registers rseq.
 // We declare them as weak so linking succeeds even without glibc.
 //
@@ -75,8 +73,6 @@ unsafe fn glibc_rseq_ptr() -> *mut Rseq {
     (tp as i64 + offset) as *mut Rseq
 }
 
-// ── Self-managed rseq area ───────────────────────────────────────────────────
-
 #[cfg(feature = "nightly")]
 #[thread_local]
 static mut LOCAL_RSEQ: Rseq = Rseq::new();
@@ -87,8 +83,6 @@ static mut THREAD_INITIALIZED: bool = false;
 
 /// Global flag: has the kernel rejected rseq? (ENOSYS → kernel too old.)
 static RSEQ_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
-
-// ── Initialization ───────────────────────────────────────────────────────────
 
 /// Possible rseq ownership modes after initialization.
 #[cfg(feature = "nightly")]
@@ -158,8 +152,6 @@ unsafe fn init_thread_rseq() -> RseqOwner {
     }
 }
 
-// ── Public API ───────────────────────────────────────────────────────────────
-
 /// Returns `true` if rseq is available on this system.
 ///
 /// After the first call to any rseq function on any thread, this reflects
@@ -227,8 +219,6 @@ pub fn current_mm_cid() -> Option<u32> {
         Some(core::ptr::read_volatile(&(*rseq).mm_cid))
     }
 }
-
-// ── RseqLocal — thread_local!-compatible handle ──────────────────────────────
 
 /// Per-thread rseq handle with cached pointer.
 ///
