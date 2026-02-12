@@ -6,11 +6,11 @@
 //! - Grow the heap by requesting memory from the OS
 //! - Register/unregister spans in the page map
 
+use crate::PAGE_SHIFT;
+use crate::PAGE_SIZE;
 use crate::pagemap::PageMap;
 use crate::platform;
 use crate::span::{self, Span, SpanList, SpanState};
-use crate::PAGE_SHIFT;
-use crate::PAGE_SIZE;
 use core::ptr;
 #[cfg(feature = "debug")]
 use std::println;
@@ -334,9 +334,9 @@ impl PageHeap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pagemap::PageMap;
     use alloc::boxed::Box;
     use alloc::vec::Vec;
-    use crate::pagemap::PageMap;
 
     // Each test creates its own PageMap to avoid interference
     fn make_heap() -> (&'static PageMap, PageHeap) {

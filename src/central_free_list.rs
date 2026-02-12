@@ -5,13 +5,13 @@
 //! When the central free list is empty, it requests a new span from the page heap
 //! and carves it into objects.
 
+use crate::PAGE_SHIFT;
+use crate::PAGE_SIZE;
 use crate::page_heap::PageHeap;
 use crate::pagemap::PageMap;
 use crate::size_class::{self, NUM_SIZE_CLASSES};
 use crate::span::{FreeObject, Span, SpanList, SpanState};
 use crate::sync::SpinMutex;
-use crate::PAGE_SHIFT;
-use crate::PAGE_SIZE;
 use core::ptr;
 #[cfg(feature = "debug")]
 use std::println;
@@ -331,11 +331,9 @@ impl CentralCache {
     pub const fn new() -> Self {
         Self {
             lists: central_cache_init![
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
-                10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-                20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
-                30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
-                40, 41, 42, 43, 44, 45,
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
+                44, 45,
             ],
         }
     }
@@ -353,7 +351,6 @@ mod tests {
 
     use super::*;
     use crate::pagemap::PageMap;
-    
 
     fn make_test_env() -> (&'static PageMap, SpinMutex<PageHeap>, CentralCache) {
         let pm = Box::leak(Box::new(PageMap::new()));

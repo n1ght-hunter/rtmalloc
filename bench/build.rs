@@ -21,9 +21,27 @@ fn main() {
     //   - percpu  (per-CPU rseq, Linux only):     --features percpu,ffi,testing
     // =========================================================================
 
-    build_variant(&cargo, &ws_root, &out_dir, "nightly,ffi,testing", "rstcmalloc_nightly");
-    build_variant(&cargo, &ws_root, &out_dir, "std,ffi,testing", "rstcmalloc_std");
-    build_variant(&cargo, &ws_root, &out_dir, "ffi,testing", "rstcmalloc_nostd");
+    build_variant(
+        &cargo,
+        &ws_root,
+        &out_dir,
+        "nightly,ffi,testing",
+        "rstcmalloc_nightly",
+    );
+    build_variant(
+        &cargo,
+        &ws_root,
+        &out_dir,
+        "std,ffi,testing",
+        "rstcmalloc_std",
+    );
+    build_variant(
+        &cargo,
+        &ws_root,
+        &out_dir,
+        "ffi,testing",
+        "rstcmalloc_nostd",
+    );
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=static=rstcmalloc_nightly");
@@ -33,7 +51,13 @@ fn main() {
     // Per-CPU variant — only on Linux x86_64 (requires rseq)
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
-        build_variant(&cargo, &ws_root, &out_dir, "percpu,ffi,testing", "rstcmalloc_percpu");
+        build_variant(
+            &cargo,
+            &ws_root,
+            &out_dir,
+            "percpu,ffi,testing",
+            "rstcmalloc_percpu",
+        );
         println!("cargo:rustc-link-lib=static=rstcmalloc_percpu");
         println!("cargo:rustc-cfg=has_rstcmalloc_percpu");
     }
@@ -65,7 +89,10 @@ fn main() {
         .join("Release");
 
     // Rerun if the vendor lib appears/changes so we pick it up
-    println!("cargo:rerun-if-changed={}", lib_dir.join("tcmalloc_minimal.lib").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        lib_dir.join("tcmalloc_minimal.lib").display()
+    );
 
     if lib_dir.join("tcmalloc_minimal.lib").exists() {
         println!("cargo:rustc-cfg=has_google_tcmalloc");

@@ -5,9 +5,7 @@
 //! lookups in the central free list for the common case where one thread frees
 //! a batch and another allocates it.
 
-use crate::central_free_list::{
-    self, CentralCache,
-};
+use crate::central_free_list::{self, CentralCache};
 use crate::page_heap::PageHeap;
 use crate::pagemap::PageMap;
 use crate::size_class::{self, NUM_SIZE_CLASSES};
@@ -102,7 +100,11 @@ impl TransferCacheArray {
         // Fall through to central free list (with lock dropping for page heap calls)
         unsafe {
             central_free_list::remove_range_dropping_lock(
-                central.get(size_class), size_class, count, page_heap, pagemap,
+                central.get(size_class),
+                size_class,
+                count,
+                page_heap,
+                pagemap,
             )
         }
     }
@@ -135,7 +137,11 @@ impl TransferCacheArray {
         // Fall through to central free list (with lock dropping for span dealloc)
         unsafe {
             central_free_list::insert_range_dropping_lock(
-                central.get(size_class), head, count, page_heap, pagemap,
+                central.get(size_class),
+                head,
+                count,
+                page_heap,
+                pagemap,
             )
         }
     }
@@ -144,9 +150,9 @@ impl TransferCacheArray {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::boxed::Box;
     use crate::page_heap::PageHeap;
     use crate::pagemap::PageMap;
+    use alloc::boxed::Box;
 
     fn make_test_env() -> (
         &'static PageMap,

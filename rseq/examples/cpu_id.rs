@@ -104,7 +104,14 @@ fn main() {
 
         // Pop from empty class → None (not abort, just empty).
         let empty = unsafe { slab.pop(rseq_ptr, 1) };
-        println!("  pop from empty class 1: {}", if empty.is_none() { "None (correct)" } else { "Some (unexpected!)" });
+        println!(
+            "  pop from empty class 1: {}",
+            if empty.is_none() {
+                "None (correct)"
+            } else {
+                "Some (unexpected!)"
+            }
+        );
     });
 
     println!("\nDone.");

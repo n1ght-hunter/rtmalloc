@@ -23,17 +23,32 @@ mod rstcmalloc_ffi {
         // Nightly variant (#[thread_local] thread cache)
         fn rstcmalloc_nightly_alloc(size: usize, align: usize) -> *mut u8;
         fn rstcmalloc_nightly_dealloc(ptr: *mut u8, size: usize, align: usize);
-        fn rstcmalloc_nightly_realloc(ptr: *mut u8, size: usize, align: usize, new_size: usize) -> *mut u8;
+        fn rstcmalloc_nightly_realloc(
+            ptr: *mut u8,
+            size: usize,
+            align: usize,
+            new_size: usize,
+        ) -> *mut u8;
 
         // Std variant (std::thread_local! thread cache)
         fn rstcmalloc_std_alloc(size: usize, align: usize) -> *mut u8;
         fn rstcmalloc_std_dealloc(ptr: *mut u8, size: usize, align: usize);
-        fn rstcmalloc_std_realloc(ptr: *mut u8, size: usize, align: usize, new_size: usize) -> *mut u8;
+        fn rstcmalloc_std_realloc(
+            ptr: *mut u8,
+            size: usize,
+            align: usize,
+            new_size: usize,
+        ) -> *mut u8;
 
         // Nostd variant (central cache only, no thread cache)
         fn rstcmalloc_nostd_alloc(size: usize, align: usize) -> *mut u8;
         fn rstcmalloc_nostd_dealloc(ptr: *mut u8, size: usize, align: usize);
-        fn rstcmalloc_nostd_realloc(ptr: *mut u8, size: usize, align: usize, new_size: usize) -> *mut u8;
+        fn rstcmalloc_nostd_realloc(
+            ptr: *mut u8,
+            size: usize,
+            align: usize,
+            new_size: usize,
+        ) -> *mut u8;
     }
 
     // Per-CPU variant (rseq, Linux x86_64 only)
@@ -41,7 +56,12 @@ mod rstcmalloc_ffi {
     unsafe extern "C" {
         fn rstcmalloc_percpu_alloc(size: usize, align: usize) -> *mut u8;
         fn rstcmalloc_percpu_dealloc(ptr: *mut u8, size: usize, align: usize);
-        fn rstcmalloc_percpu_realloc(ptr: *mut u8, size: usize, align: usize, new_size: usize) -> *mut u8;
+        fn rstcmalloc_percpu_realloc(
+            ptr: *mut u8,
+            size: usize,
+            align: usize,
+            new_size: usize,
+        ) -> *mut u8;
     }
 
     macro_rules! impl_ffi_alloc {
@@ -65,16 +85,36 @@ mod rstcmalloc_ffi {
         };
     }
 
-    impl_ffi_alloc!(RstcmallocNightly, rstcmalloc_nightly_alloc, rstcmalloc_nightly_dealloc, rstcmalloc_nightly_realloc);
-    impl_ffi_alloc!(RstcmallocStd, rstcmalloc_std_alloc, rstcmalloc_std_dealloc, rstcmalloc_std_realloc);
-    impl_ffi_alloc!(RstcmallocNostd, rstcmalloc_nostd_alloc, rstcmalloc_nostd_dealloc, rstcmalloc_nostd_realloc);
+    impl_ffi_alloc!(
+        RstcmallocNightly,
+        rstcmalloc_nightly_alloc,
+        rstcmalloc_nightly_dealloc,
+        rstcmalloc_nightly_realloc
+    );
+    impl_ffi_alloc!(
+        RstcmallocStd,
+        rstcmalloc_std_alloc,
+        rstcmalloc_std_dealloc,
+        rstcmalloc_std_realloc
+    );
+    impl_ffi_alloc!(
+        RstcmallocNostd,
+        rstcmalloc_nostd_alloc,
+        rstcmalloc_nostd_dealloc,
+        rstcmalloc_nostd_realloc
+    );
     #[cfg(has_rstcmalloc_percpu)]
-    impl_ffi_alloc!(RstcmallocPercpu, rstcmalloc_percpu_alloc, rstcmalloc_percpu_dealloc, rstcmalloc_percpu_realloc);
+    impl_ffi_alloc!(
+        RstcmallocPercpu,
+        rstcmalloc_percpu_alloc,
+        rstcmalloc_percpu_dealloc,
+        rstcmalloc_percpu_realloc
+    );
 }
 
-use rstcmalloc_ffi::{RstcmallocNightly, RstcmallocNostd, RstcmallocStd};
 #[cfg(has_rstcmalloc_percpu)]
 use rstcmalloc_ffi::RstcmallocPercpu;
+use rstcmalloc_ffi::{RstcmallocNightly, RstcmallocNostd, RstcmallocStd};
 
 // ---------------------------------------------------------------------------
 // Google tcmalloc FFI (statically linked when available)
@@ -435,7 +475,15 @@ mod summary {
     const RED: &str = "\x1b[31m";
     const BRIGHT_GREEN: &str = "\x1b[92m";
 
-    const KNOWN: &[&str] = &["system", "rstc_nightly", "rstc_percpu", "rstc_std", "rstc_nostd", "mimalloc", "google_tc"];
+    const KNOWN: &[&str] = &[
+        "system",
+        "rstc_nightly",
+        "rstc_percpu",
+        "rstc_std",
+        "rstc_nostd",
+        "mimalloc",
+        "google_tc",
+    ];
 
     fn color_for(name: &str) -> &'static str {
         match name {
@@ -492,14 +540,18 @@ mod summary {
         // Collect: group -> param -> allocator -> ns
         let mut groups: BTreeMap<String, BTreeMap<String, Vec<(String, f64)>>> = BTreeMap::new();
 
-        let Ok(group_dirs) = std::fs::read_dir(&base) else { return };
+        let Ok(group_dirs) = std::fs::read_dir(&base) else {
+            return;
+        };
         for group_entry in group_dirs.flatten() {
             let group_name = group_entry.file_name().to_string_lossy().to_string();
             if group_name == "report" || !group_entry.path().is_dir() {
                 continue;
             }
 
-            let Ok(alloc_dirs) = std::fs::read_dir(group_entry.path()) else { continue };
+            let Ok(alloc_dirs) = std::fs::read_dir(group_entry.path()) else {
+                continue;
+            };
             for alloc_entry in alloc_dirs.flatten() {
                 let alloc_name = alloc_entry.file_name().to_string_lossy().to_string();
                 if alloc_name == "report" || !alloc_entry.path().is_dir() {
@@ -507,7 +559,12 @@ mod summary {
                 }
 
                 // Check if this dir has a "new/" subdir directly (no param)
-                if alloc_entry.path().join("new").join("estimates.json").exists() {
+                if alloc_entry
+                    .path()
+                    .join("new")
+                    .join("estimates.json")
+                    .exists()
+                {
                     if let Some(ns) = read_estimate(&alloc_entry.path()) {
                         groups
                             .entry(group_name.clone())
@@ -520,7 +577,9 @@ mod summary {
                 }
 
                 // Otherwise, iterate param subdirs: <alloc>/<param>/new/estimates.json
-                let Ok(param_dirs) = std::fs::read_dir(alloc_entry.path()) else { continue };
+                let Ok(param_dirs) = std::fs::read_dir(alloc_entry.path()) else {
+                    continue;
+                };
                 for param_entry in param_dirs.flatten() {
                     let param_name = param_entry.file_name().to_string_lossy().to_string();
                     if param_name == "report" || !param_entry.path().is_dir() {
@@ -581,7 +640,10 @@ mod summary {
                 };
                 println!("  {DIM}---{label}{RESET}");
 
-                let best = results.iter().map(|(_, ns)| *ns).fold(f64::INFINITY, f64::min);
+                let best = results
+                    .iter()
+                    .map(|(_, ns)| *ns)
+                    .fold(f64::INFINITY, f64::min);
                 let worst = results.iter().map(|(_, ns)| *ns).fold(0.0f64, f64::max);
 
                 for (alloc, ns) in results {
@@ -609,14 +671,14 @@ mod summary {
     /// Hex colors for SVG plots.
     fn svg_color_for(name: &str) -> &'static str {
         match name {
-            "system" => "#888888",           // gray
+            "system" => "#888888",       // gray
             "rstc_nightly" => "#2ca02c", // green
             "rstc_percpu" => "#98df8a",  // light green
             "rstc_std" => "#9467bd",     // purple
             "rstc_nostd" => "#d62728",   // red
             "mimalloc" => "#17becf",     // cyan
-            "google_tc" => "#ff7f0e",          // orange
-            _ => "#1f78b4",                    // default blue
+            "google_tc" => "#ff7f0e",    // orange
+            _ => "#1f78b4",              // default blue
         }
     }
 
@@ -638,7 +700,9 @@ mod summary {
 
         // Find all violin.svg files
         fn visit(dir: &Path, svgs: &mut Vec<std::path::PathBuf>) {
-            let Ok(entries) = std::fs::read_dir(dir) else { return };
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
@@ -653,7 +717,9 @@ mod summary {
         visit(&base, &mut svgs);
 
         for svg_path in &svgs {
-            let Ok(content) = std::fs::read_to_string(svg_path) else { continue };
+            let Ok(content) = std::fs::read_to_string(svg_path) else {
+                continue;
+            };
 
             // Parse: find text elements that reference allocator names and their y positions.
             // Text elements look like: <text x="96" y="148" ...>group/allocator</text>
@@ -668,7 +734,9 @@ mod summary {
             let mut pos = 0;
             while let Some(start) = content[pos..].find("<text ") {
                 let abs_start = pos + start;
-                let Some(end) = content[abs_start..].find("</text>") else { break };
+                let Some(end) = content[abs_start..].find("</text>") else {
+                    break;
+                };
                 let tag = &content[abs_start..abs_start + end + 7];
 
                 // Extract y attribute
@@ -706,7 +774,8 @@ mod summary {
 
             while let Some(poly_start) = remaining.find("<polygon ") {
                 result.push_str(&remaining[..poly_start]);
-                let poly_tag_end = remaining[poly_start..].find("/>")
+                let poly_tag_end = remaining[poly_start..]
+                    .find("/>")
                     .unwrap_or(remaining.len() - poly_start);
                 let poly_tag = &remaining[poly_start..poly_start + poly_tag_end + 2];
 
@@ -714,20 +783,22 @@ mod summary {
                 let recolored = if let Some(pts_start) = poly_tag.find("points=\"") {
                     let pts = &poly_tag[pts_start + 8..];
                     // First point is like "656,148 ..."
-                    let first_y = pts.split_whitespace().next()
+                    let first_y = pts
+                        .split_whitespace()
+                        .next()
                         .and_then(|p| p.split(',').nth(1))
                         .and_then(|y| y.parse::<f64>().ok());
 
                     if let Some(y) = first_y {
                         // Find closest label
-                        let closest = label_y.iter()
-                            .min_by(|a, b| {
-                                (a.1 - y).abs().partial_cmp(&(b.1 - y).abs()).unwrap()
-                            });
+                        let closest = label_y
+                            .iter()
+                            .min_by(|a, b| (a.1 - y).abs().partial_cmp(&(b.1 - y).abs()).unwrap());
 
                         if let Some((alloc, _)) = closest {
                             let new_color = svg_color_for(alloc);
-                            poly_tag.replace("fill=\"#1F78B4\"", &format!("fill=\"{new_color}\""))
+                            poly_tag
+                                .replace("fill=\"#1F78B4\"", &format!("fill=\"{new_color}\""))
                                 .replace("fill=\"#1f78b4\"", &format!("fill=\"{new_color}\""))
                         } else {
                             poly_tag.to_string()

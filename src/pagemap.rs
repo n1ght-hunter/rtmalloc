@@ -7,9 +7,9 @@
 //! allocated from the OS. Reads are lock-free (AtomicPtr with Acquire).
 //! Writes must happen under external synchronization (the page heap lock).
 
+use crate::PAGE_SIZE;
 use crate::platform;
 use crate::span::Span;
-use crate::PAGE_SIZE;
 use core::ptr;
 use core::sync::atomic::{AtomicPtr, Ordering};
 
@@ -18,11 +18,11 @@ const MID_BITS: usize = 12;
 const LEAF_BITS: usize = 11;
 
 const ROOT_LEN: usize = 1 << ROOT_BITS; // 4096
-const MID_LEN: usize = 1 << MID_BITS;   // 4096
-const LEAF_LEN: usize = 1 << LEAF_BITS;  // 2048
+const MID_LEN: usize = 1 << MID_BITS; // 4096
+const LEAF_LEN: usize = 1 << LEAF_BITS; // 2048
 
-const MID_SHIFT: usize = LEAF_BITS;                // 11
-const ROOT_SHIFT: usize = LEAF_BITS + MID_BITS;    // 23
+const MID_SHIFT: usize = LEAF_BITS; // 11
+const ROOT_SHIFT: usize = LEAF_BITS + MID_BITS; // 23
 
 const MID_MASK: usize = (1 << MID_BITS) - 1;
 const LEAF_MASK: usize = (1 << LEAF_BITS) - 1;
@@ -52,9 +52,7 @@ macro_rules! null_atomic_array {
     ($len:expr, $T:ty) => {{
         // SAFETY: AtomicPtr<T>::new(null_mut()) is just a null pointer,
         // which has the same bit pattern as zeroed memory.
-        unsafe {
-            core::mem::transmute::<[usize; $len], [AtomicPtr<$T>; $len]>([0usize; $len])
-        }
+        unsafe { core::mem::transmute::<[usize; $len], [AtomicPtr<$T>; $len]>([0usize; $len]) }
     }};
 }
 

@@ -21,7 +21,12 @@ fn print_addrs() {
             let reconstructed = page_id << 13;
             println!(
                 "size {:>6}: addr=0x{:016x} page_id={} offset_in_page={} reconstructed=0x{:016x} match={}",
-                size, addr, page_id, page_offset, reconstructed, reconstructed == addr
+                size,
+                addr,
+                page_id,
+                page_offset,
+                reconstructed,
+                reconstructed == addr
             );
             unsafe { ALLOC.dealloc(ptr, layout) };
         }

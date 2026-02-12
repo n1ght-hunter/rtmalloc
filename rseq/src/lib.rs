@@ -18,13 +18,13 @@
 #![cfg_attr(feature = "nightly", feature(thread_local, linkage))]
 
 pub mod abi;
-pub mod syscall;
-pub mod thread;
 pub mod ops;
 pub mod percpu;
+pub mod syscall;
+pub mod thread;
 
 // Re-export key types at crate root.
-pub use abi::{Rseq, RseqCs, RSEQ_SIG};
-pub use thread::{current_cpu, current_rseq, rseq_available, RseqLocal};
+pub use abi::{RSEQ_SIG, Rseq, RseqCs};
 pub use ops::{percpu_add, percpu_cmpxchg, percpu_load, percpu_store};
 pub use percpu::{PerCpuSlab, SlabHeader};
+pub use thread::{RseqLocal, current_cpu, current_rseq, rseq_available};

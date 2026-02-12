@@ -9,7 +9,6 @@ mod windows;
 #[cfg(unix)]
 mod unix;
 
-
 /// Allocate `size` bytes of virtual memory, page-aligned.
 /// Returns null on failure. Memory is zero-initialized by the OS.
 /// `size` is rounded up to the platform allocation granularity.

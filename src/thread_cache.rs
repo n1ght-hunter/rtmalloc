@@ -180,8 +180,13 @@ impl ThreadCache {
                     self.total_size -= count as usize * info.size;
                     unsafe {
                         transfer_cache.insert_range(
-                            cls, head, tail, count as usize,
-                            central, page_heap, pagemap,
+                            cls,
+                            head,
+                            tail,
+                            count as usize,
+                            central,
+                            page_heap,
+                            pagemap,
                         )
                     };
                 }
@@ -236,7 +241,9 @@ impl ThreadCache {
 
         // Check if we should return objects to transfer/central cache
         if list.length > list.max_length {
-            unsafe { self.release_to_central(size_class, transfer_cache, central, page_heap, pagemap) };
+            unsafe {
+                self.release_to_central(size_class, transfer_cache, central, page_heap, pagemap)
+            };
         }
 
         // Check total cache size for GC
@@ -319,8 +326,13 @@ impl ThreadCache {
 
         unsafe {
             transfer_cache.insert_range(
-                size_class, head, tail, count as usize,
-                central, page_heap, pagemap,
+                size_class,
+                head,
+                tail,
+                count as usize,
+                central,
+                page_heap,
+                pagemap,
             )
         };
 
@@ -380,8 +392,13 @@ impl ThreadCache {
 
                 unsafe {
                     transfer_cache.insert_range(
-                        cls, head, tail, count as usize,
-                        central, page_heap, pagemap,
+                        cls,
+                        head,
+                        tail,
+                        count as usize,
+                        central,
+                        page_heap,
+                        pagemap,
                     )
                 };
             }
@@ -432,11 +449,11 @@ impl ThreadCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::boxed::Box;
-    use alloc::vec::Vec;
     use crate::page_heap::PageHeap;
     use crate::pagemap::PageMap;
     use crate::transfer_cache::TransferCacheArray;
+    use alloc::boxed::Box;
+    use alloc::vec::Vec;
 
     fn make_test_env() -> (
         &'static PageMap,

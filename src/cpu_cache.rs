@@ -114,7 +114,11 @@ fn init_slow() {
         capacities[class] = size_class::class_info(class).batch_size as u16;
     }
 
-    let ok = unsafe { CPU_SLAB.get_mut().init(region, num_cpus, SHIFT, &capacities) };
+    let ok = unsafe {
+        CPU_SLAB
+            .get_mut()
+            .init(region, num_cpus, SHIFT, &capacities)
+    };
     if !ok {
         // Layout doesn't fit — shouldn't happen with shift=18.
         unsafe { crate::platform::page_dealloc(region, region_size) };
@@ -148,9 +152,7 @@ pub unsafe fn alloc(
 
     // If slab init failed, go straight to central.
     if !CPU_SLAB.get().is_initialized() {
-        return unsafe {
-            alloc_from_central(class, transfer_cache, central, page_heap, pagemap)
-        };
+        return unsafe { alloc_from_central(class, transfer_cache, central, page_heap, pagemap) };
     }
 
     let rseq_ptr = match RSEQ.rseq_ptr() {
@@ -212,9 +214,7 @@ pub unsafe fn dealloc(
 
     // If slab init failed, go straight to central.
     if !CPU_SLAB.get().is_initialized() {
-        unsafe {
-            dealloc_to_central(ptr, class, transfer_cache, central, page_heap, pagemap)
-        };
+        unsafe { dealloc_to_central(ptr, class, transfer_cache, central, page_heap, pagemap) };
         return;
     }
 
@@ -222,9 +222,7 @@ pub unsafe fn dealloc(
         Some(p) => p,
         None => {
             // rseq unavailable — return directly to central.
-            unsafe {
-                dealloc_to_central(ptr, class, transfer_cache, central, page_heap, pagemap)
-            };
+            unsafe { dealloc_to_central(ptr, class, transfer_cache, central, page_heap, pagemap) };
             return;
         }
     };
@@ -271,9 +269,8 @@ unsafe fn refill(
 ) {
     let batch_size = size_class::class_info(class).batch_size;
 
-    let (count, head) = unsafe {
-        transfer_cache.remove_range(class, batch_size, central, page_heap, pagemap)
-    };
+    let (count, head) =
+        unsafe { transfer_cache.remove_range(class, batch_size, central, page_heap, pagemap) };
 
     if count == 0 || head.is_null() {
         return;
@@ -308,9 +305,8 @@ unsafe fn refill(
                 walk = unsafe { (*walk).next };
             }
             unsafe {
-                transfer_cache.insert_range(
-                    class, node, tail, remaining, central, page_heap, pagemap,
-                )
+                transfer_cache
+                    .insert_range(class, node, tail, remaining, central, page_heap, pagemap)
             };
             return;
         }
@@ -386,9 +382,8 @@ unsafe fn alloc_from_central(
     page_heap: &SpinMutex<PageHeap>,
     pagemap: &PageMap,
 ) -> *mut u8 {
-    let (count, head) = unsafe {
-        transfer_cache.remove_range(class, 1, central, page_heap, pagemap)
-    };
+    let (count, head) =
+        unsafe { transfer_cache.remove_range(class, 1, central, page_heap, pagemap) };
     if count == 0 || head.is_null() {
         ptr::null_mut()
     } else {
@@ -408,7 +403,5 @@ unsafe fn dealloc_to_central(
 ) {
     let obj = ptr as *mut FreeObject;
     unsafe { (*obj).next = ptr::null_mut() };
-    unsafe {
-        transfer_cache.insert_range(class, obj, obj, 1, central, page_heap, pagemap)
-    };
+    unsafe { transfer_cache.insert_range(class, obj, obj, 1, central, page_heap, pagemap) };
 }

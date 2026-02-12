@@ -20,20 +20,20 @@ extern crate alloc;
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
-pub mod size_class;
-pub mod platform;
-pub mod sync;
-pub mod span;
-pub mod pagemap;
-pub mod page_heap;
-pub mod central_free_list;
-pub mod transfer_cache;
-pub mod thread_cache;
 pub mod allocator;
+pub mod central_free_list;
 #[cfg(feature = "percpu")]
 pub mod cpu_cache;
 #[cfg(feature = "ffi")]
 pub mod ffi;
+pub mod page_heap;
+pub mod pagemap;
+pub mod platform;
+pub mod size_class;
+pub mod span;
+pub mod sync;
+pub mod thread_cache;
+pub mod transfer_cache;
 
 /// Page size used by the allocator (8 KiB).
 pub const PAGE_SHIFT: usize = 13;
