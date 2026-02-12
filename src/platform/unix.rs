@@ -25,21 +25,41 @@ unsafe extern "C" {
 }
 
 pub unsafe fn page_alloc(size: usize) -> *mut u8 {
-    let ptr = unsafe {
+    // Our PAGE_SIZE (8 KiB) is larger than the Linux system page size (4 KiB).
+    // mmap only guarantees 4 KiB alignment, so we over-allocate and trim
+    // to guarantee alignment to our PAGE_SIZE (8 KiB).
+    const ALIGN: usize = 8192; // Must match crate::PAGE_SIZE
+
+    let raw = unsafe {
         mmap(
             core::ptr::null_mut(),
-            size,
+            size + ALIGN,
             PROT_READ | PROT_WRITE,
             MAP_PRIVATE | MAP_ANONYMOUS,
             -1,
             0,
         )
     };
-    if ptr == MAP_FAILED {
-        core::ptr::null_mut()
-    } else {
-        ptr as *mut u8
+    if raw == MAP_FAILED {
+        return core::ptr::null_mut();
     }
+
+    let raw_addr = raw as usize;
+    let aligned_addr = (raw_addr + ALIGN - 1) & !(ALIGN - 1);
+
+    // Trim leading waste (0 or 4096 bytes)
+    let lead = aligned_addr - raw_addr;
+    if lead > 0 {
+        unsafe { munmap(raw_addr as *mut c_void, lead) };
+    }
+
+    // Trim trailing waste (ALIGN - lead bytes)
+    let trail = (raw_addr + size + ALIGN) - (aligned_addr + size);
+    if trail > 0 {
+        unsafe { munmap((aligned_addr + size) as *mut c_void, trail) };
+    }
+
+    aligned_addr as *mut u8
 }
 
 pub unsafe fn page_dealloc(ptr: *mut u8, size: usize) {

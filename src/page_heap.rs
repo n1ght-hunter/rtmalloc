@@ -17,6 +17,14 @@ use core::ptr;
 /// Spans larger than this go into `large_spans`.
 const MAX_PAGES: usize = 128;
 
+#[cfg(feature = "testing")]
+fn _dbg(msg: &[u8]) {
+    unsafe extern "C" {
+        fn write(fd: i32, buf: *const u8, count: usize) -> isize;
+    }
+    unsafe { write(2, msg.as_ptr(), msg.len()) };
+}
+
 pub struct PageHeap {
     /// free_lists[k] holds free spans of exactly k pages (index 0 unused).
     free_lists: [SpanList; MAX_PAGES + 1],
@@ -108,6 +116,9 @@ impl PageHeap {
 
         if total > num_pages {
             // Create a remainder span
+            #[cfg(feature = "testing")]
+            _dbg(b"[carve] alloc remainder\n");
+
             let remainder = span::alloc_span();
             if remainder.is_null() {
                 // Can't allocate span metadata - return the whole thing
@@ -126,16 +137,30 @@ impl PageHeap {
                 // Update original span
                 (*span).num_pages = num_pages;
 
+                #[cfg(feature = "testing")]
+                _dbg(b"[carve] register remainder in pagemap\n");
+
                 // Register both in pagemap
                 self.pagemap.register_span(remainder);
+
+                #[cfg(feature = "testing")]
+                _dbg(b"[carve] insert remainder in freelist\n");
+
                 self.insert_free(remainder);
             }
         }
+
+        #[cfg(feature = "testing")]
+        _dbg(b"[carve] register span in pagemap\n");
 
         unsafe {
             (*span).state = SpanState::InUse;
             self.pagemap.register_span(span);
         }
+
+        #[cfg(feature = "testing")]
+        _dbg(b"[carve] done\n");
+
         span
     }
 
@@ -175,6 +200,9 @@ impl PageHeap {
         let alloc_pages = num_pages.max(128);
         let alloc_size = alloc_pages * PAGE_SIZE;
 
+        #[cfg(feature = "testing")]
+        _dbg(b"[grow] mmap\n");
+
         let ptr = unsafe { platform::page_alloc(alloc_size) };
         if ptr.is_null() {
             // Try exact size as fallback
@@ -185,6 +213,9 @@ impl PageHeap {
         }
 
         let start_page = (ptr as usize) >> PAGE_SHIFT;
+
+        #[cfg(feature = "testing")]
+        _dbg(b"[grow] alloc span struct\n");
 
         let s = span::alloc_span();
         if s.is_null() {
@@ -197,6 +228,9 @@ impl PageHeap {
             (*s).num_pages = alloc_pages;
             (*s).state = SpanState::InUse; // Will be carved immediately
         }
+
+        #[cfg(feature = "testing")]
+        _dbg(b"[grow] carve\n");
 
         // Carve out what we need, remainder goes to free list
         unsafe { self.carve_span(s, num_pages) }

@@ -14,6 +14,14 @@ use crate::PAGE_SHIFT;
 use crate::PAGE_SIZE;
 use core::ptr;
 
+#[cfg(feature = "testing")]
+fn _dbg(msg: &[u8]) {
+    unsafe extern "C" {
+        fn write(fd: i32, buf: *const u8, count: usize) -> isize;
+    }
+    unsafe { write(2, msg.as_ptr(), msg.len()) };
+}
+
 /// Central free list for a single size class.
 pub struct CentralFreeList {
     /// Size class index this list manages.
@@ -149,11 +157,18 @@ impl CentralFreeList {
         unsafe {
             (*span).size_class = self.size_class;
             (*span).state = SpanState::InUse;
+
+            #[cfg(feature = "testing")]
+            _dbg(b"[inject] register_span\n");
+
             pagemap.register_span(span);
 
             let base = (*span).start_addr();
             let span_bytes = (*span).num_pages * PAGE_SIZE;
             let num_objects = span_bytes / obj_size;
+
+            #[cfg(feature = "testing")]
+            _dbg(b"[inject] build freelist\n");
 
             (*span).total_count = num_objects as u32;
             (*span).allocated_count = 0;
@@ -164,6 +179,9 @@ impl CentralFreeList {
                 (*obj).next = freelist;
                 freelist = obj;
             }
+
+            #[cfg(feature = "testing")]
+            _dbg(b"[inject] done\n");
 
             (*span).freelist = freelist;
             self.num_free += num_objects;
