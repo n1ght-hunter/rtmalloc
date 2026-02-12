@@ -190,6 +190,11 @@ fn try_build_google_tcmalloc(ws_root: &Path) -> bool {
             &format!("-DCMAKE_INSTALL_PREFIX={}", install_dir.display()),
             "-DBUILD_SHARED_LIBS=OFF",
             "-DBUILD_TESTING=OFF",
+            // Use static CRT (/MT) to match snmalloc-sys
+            "-DCMAKE_POLICY_DEFAULT_CMP0091=NEW",
+            "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded",
+            "-DCMAKE_C_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG",
+            "-DCMAKE_CXX_FLAGS_RELEASE=/MT /O2 /Ob2 /DNDEBUG",
         ])
         .status();
     if !matches!(status, Ok(s) if s.success()) {

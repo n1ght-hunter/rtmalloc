@@ -183,6 +183,13 @@ static GOOGLE_TC: GoogleTcMalloc = GoogleTcMalloc;
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Wrapper to send raw pointers across threads in benchmarks.
+/// Safety: the benchmarks ensure each pointer is only used by one thread at a time.
+struct SendPtr(*mut u8);
+unsafe impl Send for SendPtr {}
+
+// ---------------------------------------------------------------------------
+
 unsafe fn alloc_dealloc(allocator: &dyn GlobalAlloc, layout: Layout) {
     let ptr = unsafe { allocator.alloc(layout) };
     assert!(!ptr.is_null());
@@ -504,6 +511,380 @@ fn bench_multithreaded(c: &mut Criterion) {
     group.finish();
 }
 
+// ---------------------------------------------------------------------------
+// Cross-thread free (Larson pattern): alloc on thread A, free on thread B
+// ---------------------------------------------------------------------------
+
+fn bench_cross_thread_free(c: &mut Criterion) {
+    let mut group = c.benchmark_group("cross_thread_free");
+    let ops = 2000usize;
+    let nthreads = 4;
+    group.throughput(Throughput::Elements((ops * nthreads) as u64));
+    group.sample_size(20);
+
+    /// Allocate objects on producer threads, send them to consumer threads for
+    /// deallocation. This is the core pattern that stresses thread caches —
+    /// the freeing thread didn't allocate the object, so it must return it
+    /// through the central path (or transfer cache).
+    fn cross_thread_workload<A: GlobalAlloc + Sync>(
+        allocator: &'static A,
+        nthreads: usize,
+        ops: usize,
+    ) {
+        use std::sync::mpsc;
+        let layout = Layout::from_size_align(64, 8).unwrap();
+
+        // Each producer has a paired consumer.
+        let mut producer_handles = Vec::new();
+        let mut consumer_handles = Vec::new();
+
+        for _ in 0..nthreads {
+            let (tx, rx) = mpsc::channel::<SendPtr>();
+
+            producer_handles.push(std::thread::spawn(move || {
+                for _ in 0..ops {
+                    let ptr = unsafe { allocator.alloc(layout) };
+                    assert!(!ptr.is_null());
+                    tx.send(SendPtr(ptr)).unwrap();
+                }
+            }));
+
+            consumer_handles.push(std::thread::spawn(move || {
+                for SendPtr(ptr) in rx {
+                    unsafe { allocator.dealloc(ptr, layout) };
+                }
+            }));
+        }
+
+        for h in producer_handles {
+            h.join().unwrap();
+        }
+        // Producers are done and dropped their tx, consumers will drain and exit.
+        for h in consumer_handles {
+            h.join().unwrap();
+        }
+    }
+
+    static SYS2: System = System;
+
+    group.bench_function("system", |b| {
+        b.iter(|| cross_thread_workload(&SYS2, nthreads, ops))
+    });
+    group.bench_function("rstc_nightly", |b| {
+        b.iter(|| cross_thread_workload(&TCMALLOC_NIGHTLY, nthreads, ops))
+    });
+    #[cfg(has_rstcmalloc_percpu)]
+    group.bench_function("rstc_percpu", |b| {
+        b.iter(|| cross_thread_workload(&TCMALLOC_PERCPU, nthreads, ops))
+    });
+    group.bench_function("rstc_std", |b| {
+        b.iter(|| cross_thread_workload(&TCMALLOC_STD, nthreads, ops))
+    });
+    group.bench_function("rstc_nostd", |b| {
+        b.iter(|| cross_thread_workload(&TCMALLOC_NOSTD, nthreads, ops))
+    });
+    group.bench_function("mimalloc", |b| {
+        b.iter(|| cross_thread_workload(&MIMALLOC, nthreads, ops))
+    });
+    #[cfg(has_google_tcmalloc)]
+    group.bench_function("google_tc", |b| {
+        b.iter(|| cross_thread_workload(&GOOGLE_TC, nthreads, ops))
+    });
+    group.bench_function("snmalloc", |b| {
+        b.iter(|| cross_thread_workload(&SNMALLOC, nthreads, ops))
+    });
+    group.bench_function("rpmalloc", |b| {
+        b.iter(|| cross_thread_workload(&RPMALLOC, nthreads, ops))
+    });
+    #[cfg(has_jemalloc)]
+    group.bench_function("jemalloc", |b| {
+        b.iter(|| cross_thread_workload(&JEMALLOC, nthreads, ops))
+    });
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Thread scalability: same workload at 1, 2, 4, 8 threads
+// ---------------------------------------------------------------------------
+
+fn bench_thread_scalability(c: &mut Criterion) {
+    let mut group = c.benchmark_group("thread_scalability");
+    let ops_per_thread = 3000usize;
+    group.sample_size(15);
+
+    fn scale_workload<A: GlobalAlloc + Sync>(allocator: &'static A, nthreads: usize, ops: usize) {
+        let layout = Layout::from_size_align(64, 8).unwrap();
+        let handles: Vec<_> = (0..nthreads)
+            .map(|_| {
+                std::thread::spawn(move || {
+                    let mut ptrs: Vec<*mut u8> = Vec::with_capacity(64);
+                    for _ in 0..ops {
+                        let ptr = unsafe { allocator.alloc(layout) };
+                        assert!(!ptr.is_null());
+                        ptrs.push(ptr);
+                        if ptrs.len() > 32 {
+                            for _ in 0..16 {
+                                let p = ptrs.pop().unwrap();
+                                unsafe { allocator.dealloc(p, layout) };
+                            }
+                        }
+                    }
+                    for p in ptrs {
+                        unsafe { allocator.dealloc(p, layout) };
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+
+    static SYS3: System = System;
+
+    for &nthreads in &[1usize, 2, 4, 8] {
+        group.throughput(Throughput::Elements((ops_per_thread * nthreads) as u64));
+
+        group.bench_with_input(BenchmarkId::new("system", nthreads), &nthreads, |b, &nt| {
+            b.iter(|| scale_workload(&SYS3, nt, ops_per_thread))
+        });
+        group.bench_with_input(
+            BenchmarkId::new("rstc_nightly", nthreads),
+            &nthreads,
+            |b, &nt| b.iter(|| scale_workload(&TCMALLOC_NIGHTLY, nt, ops_per_thread)),
+        );
+        #[cfg(has_rstcmalloc_percpu)]
+        group.bench_with_input(
+            BenchmarkId::new("rstc_percpu", nthreads),
+            &nthreads,
+            |b, &nt| b.iter(|| scale_workload(&TCMALLOC_PERCPU, nt, ops_per_thread)),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("rstc_std", nthreads),
+            &nthreads,
+            |b, &nt| b.iter(|| scale_workload(&TCMALLOC_STD, nt, ops_per_thread)),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("rstc_nostd", nthreads),
+            &nthreads,
+            |b, &nt| b.iter(|| scale_workload(&TCMALLOC_NOSTD, nt, ops_per_thread)),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("mimalloc", nthreads),
+            &nthreads,
+            |b, &nt| b.iter(|| scale_workload(&MIMALLOC, nt, ops_per_thread)),
+        );
+        #[cfg(has_google_tcmalloc)]
+        group.bench_with_input(
+            BenchmarkId::new("google_tc", nthreads),
+            &nthreads,
+            |b, &nt| b.iter(|| scale_workload(&GOOGLE_TC, nt, ops_per_thread)),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("snmalloc", nthreads),
+            &nthreads,
+            |b, &nt| b.iter(|| scale_workload(&SNMALLOC, nt, ops_per_thread)),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("rpmalloc", nthreads),
+            &nthreads,
+            |b, &nt| b.iter(|| scale_workload(&RPMALLOC, nt, ops_per_thread)),
+        );
+        #[cfg(has_jemalloc)]
+        group.bench_with_input(
+            BenchmarkId::new("jemalloc", nthreads),
+            &nthreads,
+            |b, &nt| b.iter(|| scale_workload(&JEMALLOC, nt, ops_per_thread)),
+        );
+    }
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Mixed sizes: realistic size distribution (many small, few large)
+// ---------------------------------------------------------------------------
+
+fn bench_mixed_sizes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("mixed_sizes");
+    let n = 2000usize;
+    group.throughput(Throughput::Elements(n as u64));
+    group.sample_size(30);
+
+    /// Mimalloc-style size distribution: linearly distributed in powers-of-2
+    /// buckets, with 1% large objects (100x base) and 0.1% huge objects (1000x).
+    /// Uses a deterministic PRNG for reproducibility.
+    fn mixed_workload(allocator: &dyn GlobalAlloc, n: usize) {
+        // Splitmix64 PRNG (deterministic, fast, good enough for size distribution)
+        let mut rng_state: u64 = 0xDEAD_BEEF_CAFE_BABE;
+        let mut next_u64 = || -> u64 {
+            rng_state = rng_state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = rng_state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        };
+
+        let base_sizes: &[usize] = &[8, 16, 32, 64, 128, 256, 512, 1024];
+        let mut ptrs: Vec<(*mut u8, Layout)> = Vec::with_capacity(n);
+
+        for _ in 0..n {
+            let r = next_u64();
+            let base = base_sizes[(r as usize) % base_sizes.len()];
+            // 1% large, 0.1% huge
+            let size = if r % 1000 == 0 {
+                base * 1000 // huge
+            } else if r % 100 == 0 {
+                base * 100 // large
+            } else {
+                base
+            };
+            let layout = Layout::from_size_align(size, 8).unwrap();
+            let ptr = unsafe { allocator.alloc(layout) };
+            assert!(!ptr.is_null());
+            ptrs.push((ptr, layout));
+
+            // Free ~30% of live objects to maintain churn
+            if ptrs.len() > 10 && r % 3 == 0 {
+                let idx = (next_u64() as usize) % ptrs.len();
+                let (p, l) = ptrs.swap_remove(idx);
+                unsafe { allocator.dealloc(p, l) };
+            }
+        }
+
+        for (p, l) in ptrs {
+            unsafe { allocator.dealloc(p, l) };
+        }
+    }
+
+    group.bench_function("system", |b| {
+        b.iter(|| mixed_workload(&System, black_box(n)))
+    });
+    group.bench_function("rstc_nightly", |b| {
+        b.iter(|| mixed_workload(&TCMALLOC_NIGHTLY, black_box(n)))
+    });
+    #[cfg(has_rstcmalloc_percpu)]
+    group.bench_function("rstc_percpu", |b| {
+        b.iter(|| mixed_workload(&TCMALLOC_PERCPU, black_box(n)))
+    });
+    group.bench_function("rstc_std", |b| {
+        b.iter(|| mixed_workload(&TCMALLOC_STD, black_box(n)))
+    });
+    group.bench_function("rstc_nostd", |b| {
+        b.iter(|| mixed_workload(&TCMALLOC_NOSTD, black_box(n)))
+    });
+    group.bench_function("mimalloc", |b| {
+        b.iter(|| mixed_workload(&MIMALLOC, black_box(n)))
+    });
+    #[cfg(has_google_tcmalloc)]
+    group.bench_function("google_tc", |b| {
+        b.iter(|| mixed_workload(&GOOGLE_TC, black_box(n)))
+    });
+    group.bench_function("snmalloc", |b| {
+        b.iter(|| mixed_workload(&SNMALLOC, black_box(n)))
+    });
+    group.bench_function("rpmalloc", |b| {
+        b.iter(|| mixed_workload(&RPMALLOC, black_box(n)))
+    });
+    #[cfg(has_jemalloc)]
+    group.bench_function("jemalloc", |b| {
+        b.iter(|| mixed_workload(&JEMALLOC, black_box(n)))
+    });
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Producer-consumer: N threads allocate only, N threads free only
+// ---------------------------------------------------------------------------
+
+fn bench_producer_consumer(c: &mut Criterion) {
+    let mut group = c.benchmark_group("producer_consumer");
+    let ops_per_producer = 2000usize;
+    let npairs = 4;
+    group.throughput(Throughput::Elements((ops_per_producer * npairs) as u64));
+    group.sample_size(15);
+
+    /// Asymmetric workload: producer threads only allocate and send pointers
+    /// through a channel; consumer threads only receive and free. This is the
+    /// worst case for thread-local caches because every free goes through the
+    /// slow path (the freeing thread never allocated from its own cache).
+    fn pc_workload<A: GlobalAlloc + Sync>(allocator: &'static A, npairs: usize, ops: usize) {
+        use std::sync::mpsc;
+
+        // Use mixed sizes to stress multiple size classes simultaneously.
+        let sizes: &[usize] = &[16, 64, 256, 1024];
+        let mut producers = Vec::new();
+        let mut consumers = Vec::new();
+
+        for pair_id in 0..npairs {
+            let (tx, rx) = mpsc::channel::<(SendPtr, Layout)>();
+
+            producers.push(std::thread::spawn(move || {
+                for i in 0..ops {
+                    let size = sizes[(pair_id + i) % sizes.len()];
+                    let layout = Layout::from_size_align(size, 8).unwrap();
+                    let ptr = unsafe { allocator.alloc(layout) };
+                    assert!(!ptr.is_null());
+                    tx.send((SendPtr(ptr), layout)).unwrap();
+                }
+            }));
+
+            consumers.push(std::thread::spawn(move || {
+                for (SendPtr(ptr), layout) in rx {
+                    unsafe { allocator.dealloc(ptr, layout) };
+                }
+            }));
+        }
+
+        for h in producers {
+            h.join().unwrap();
+        }
+        for h in consumers {
+            h.join().unwrap();
+        }
+    }
+
+    static SYS4: System = System;
+
+    group.bench_function("system", |b| {
+        b.iter(|| pc_workload(&SYS4, npairs, ops_per_producer))
+    });
+    group.bench_function("rstc_nightly", |b| {
+        b.iter(|| pc_workload(&TCMALLOC_NIGHTLY, npairs, ops_per_producer))
+    });
+    #[cfg(has_rstcmalloc_percpu)]
+    group.bench_function("rstc_percpu", |b| {
+        b.iter(|| pc_workload(&TCMALLOC_PERCPU, npairs, ops_per_producer))
+    });
+    group.bench_function("rstc_std", |b| {
+        b.iter(|| pc_workload(&TCMALLOC_STD, npairs, ops_per_producer))
+    });
+    group.bench_function("rstc_nostd", |b| {
+        b.iter(|| pc_workload(&TCMALLOC_NOSTD, npairs, ops_per_producer))
+    });
+    group.bench_function("mimalloc", |b| {
+        b.iter(|| pc_workload(&MIMALLOC, npairs, ops_per_producer))
+    });
+    #[cfg(has_google_tcmalloc)]
+    group.bench_function("google_tc", |b| {
+        b.iter(|| pc_workload(&GOOGLE_TC, npairs, ops_per_producer))
+    });
+    group.bench_function("snmalloc", |b| {
+        b.iter(|| pc_workload(&SNMALLOC, npairs, ops_per_producer))
+    });
+    group.bench_function("rpmalloc", |b| {
+        b.iter(|| pc_workload(&RPMALLOC, npairs, ops_per_producer))
+    });
+    #[cfg(has_jemalloc)]
+    group.bench_function("jemalloc", |b| {
+        b.iter(|| pc_workload(&JEMALLOC, npairs, ops_per_producer))
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_single_alloc_dealloc,
@@ -511,6 +892,10 @@ criterion_group!(
     bench_churn,
     bench_vec_push,
     bench_multithreaded,
+    bench_cross_thread_free,
+    bench_thread_scalability,
+    bench_mixed_sizes,
+    bench_producer_consumer,
 );
 
 // ---------------------------------------------------------------------------
@@ -906,6 +1291,10 @@ fn main() {
     bench_churn(&mut criterion);
     bench_vec_push(&mut criterion);
     bench_multithreaded(&mut criterion);
+    bench_cross_thread_free(&mut criterion);
+    bench_thread_scalability(&mut criterion);
+    bench_mixed_sizes(&mut criterion);
+    bench_producer_consumer(&mut criterion);
 
     // Recolor SVG plots so each allocator has a distinct color
     summary::recolor_svgs();
