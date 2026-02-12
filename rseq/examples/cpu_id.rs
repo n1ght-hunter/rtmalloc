@@ -6,7 +6,7 @@
 use rseq::{PerCpuSlab, RseqLocal};
 
 thread_local! {
-    static RSEQ: RseqLocal = RseqLocal::new();
+    static RSEQ: RseqLocal = const { RseqLocal::new() };
 }
 
 /// Number of size classes for the demo slab.

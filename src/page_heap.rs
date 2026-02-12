@@ -54,6 +54,10 @@ impl PageHeap {
 
     /// Allocate a span of at least `num_pages` pages.
     /// Returns a pointer to the Span, or null on failure.
+    ///
+    /// # Safety
+    ///
+    /// Caller must hold exclusive access (via the enclosing `SpinMutex`).
     pub unsafe fn allocate_span(&mut self, num_pages: usize) -> *mut Span {
         assert!(num_pages > 0);
 
@@ -81,6 +85,10 @@ impl PageHeap {
 
     /// Deallocate a span, returning it to the free lists.
     /// Attempts to coalesce with adjacent free spans.
+    ///
+    /// # Safety
+    ///
+    /// `span` must be a valid, in-use span previously returned by `allocate_span`.
     pub unsafe fn deallocate_span(&mut self, span: *mut Span) {
         unsafe {
             (*span).state = SpanState::Free;

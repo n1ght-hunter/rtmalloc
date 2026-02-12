@@ -41,6 +41,11 @@ impl CentralFreeList {
     /// Remove up to `batch_size` objects from this central free list.
     /// Returns (count, head_of_linked_list).
     /// If the list is empty, fetches a new span from the page heap.
+    ///
+    /// # Safety
+    ///
+    /// Caller must hold exclusive access (via the enclosing `SpinMutex`).
+    /// `page_heap` and `pagemap` must be the global instances.
     pub unsafe fn remove_range(
         &mut self,
         batch_size: usize,
@@ -84,6 +89,11 @@ impl CentralFreeList {
 
     /// Insert a batch of objects back into the central free list.
     /// If any span becomes completely free, returns it to the page heap.
+    ///
+    /// # Safety
+    ///
+    /// `head` must point to a valid linked list of `count` `FreeObject`s
+    /// that were previously allocated from this allocator.
     pub unsafe fn insert_range(
         &mut self,
         mut head: *mut FreeObject,
@@ -192,6 +202,10 @@ impl CentralFreeList {
 ///
 /// This prevents threads wanting the same size class from blocking while another
 /// thread waits for OS memory in VirtualAlloc/mmap.
+///
+/// # Safety
+///
+/// `page_heap` and `pagemap` must be the global instances.
 pub unsafe fn remove_range_dropping_lock(
     cfl_lock: &SpinMutex<CentralFreeList>,
     size_class: usize,
@@ -250,6 +264,10 @@ pub unsafe fn remove_range_dropping_lock(
 }
 
 /// Insert objects back, dropping the central lock for page heap span deallocation.
+///
+/// # Safety
+///
+/// `head` must point to a valid linked list of `count` `FreeObject`s.
 pub unsafe fn insert_range_dropping_lock(
     cfl_lock: &SpinMutex<CentralFreeList>,
     mut head: *mut FreeObject,
@@ -308,8 +326,8 @@ pub unsafe fn insert_range_dropping_lock(
     // Central lock dropped
 
     // Phase 2: Return freed spans to page heap (NO central lock held)
-    for i in 0..num_freed {
-        unsafe { page_heap.lock().deallocate_span(freed_spans[i]) };
+    for span in freed_spans.iter().take(num_freed) {
+        unsafe { page_heap.lock().deallocate_span(*span) };
     }
 }
 
@@ -325,6 +343,12 @@ macro_rules! central_cache_init {
     ($($i:literal),* $(,)?) => {
         [$(SpinMutex::new(CentralFreeList::new($i))),*]
     };
+}
+
+impl Default for CentralCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CentralCache {

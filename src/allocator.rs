@@ -125,7 +125,7 @@ unsafe impl GlobalAlloc for TcMalloc {
             let class = size_class::size_to_class(effective_size);
             if class != 0 {
                 let class_size = size_class::class_to_size(class);
-                if class_size % align != 0 {
+                if !class_size.is_multiple_of(align) {
                     return unsafe { self.alloc_large(layout) };
                 }
                 return unsafe { self.alloc_small(class) };
@@ -364,7 +364,7 @@ impl TcMalloc {
         let size = layout.size();
         let align = layout.align();
 
-        let pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+        let pages = size.div_ceil(PAGE_SIZE);
         let span = unsafe { PAGE_HEAP.lock().allocate_span(pages) };
         if span.is_null() {
             return ptr::null_mut();
@@ -381,7 +381,7 @@ impl TcMalloc {
             return addr;
         }
 
-        if (addr as usize) % align == 0 {
+        if (addr as usize).is_multiple_of(align) {
             return addr;
         }
 

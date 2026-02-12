@@ -75,6 +75,12 @@ pub struct SpanList {
     pub count: usize,
 }
 
+impl Default for SpanList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SpanList {
     pub const fn new() -> Self {
         Self {
@@ -84,6 +90,10 @@ impl SpanList {
     }
 
     /// Prepend a span to the front of the list.
+    ///
+    /// # Safety
+    ///
+    /// `span` must be a valid, non-null pointer to a `Span` not already in a list.
     pub unsafe fn push(&mut self, span: *mut Span) {
         unsafe {
             (*span).next = self.head;
@@ -97,6 +107,10 @@ impl SpanList {
     }
 
     /// Remove a specific span from the list.
+    ///
+    /// # Safety
+    ///
+    /// `span` must be a valid pointer to a `Span` that is currently in this list.
     pub unsafe fn remove(&mut self, span: *mut Span) {
         unsafe {
             let prev = (*span).prev;
@@ -116,6 +130,10 @@ impl SpanList {
     }
 
     /// Pop the first span from the list.
+    ///
+    /// # Safety
+    ///
+    /// The list's internal pointers must be valid (maintained by `push`/`remove`).
     pub unsafe fn pop(&mut self) -> *mut Span {
         let span = self.head;
         if !span.is_null() {
@@ -217,6 +235,10 @@ pub fn alloc_span() -> *mut Span {
 }
 
 /// Return a Span struct to the slab allocator for reuse.
+///
+/// # Safety
+///
+/// `span` must have been returned by [`alloc_span`] and must not be in any list.
 pub unsafe fn dealloc_span(span: *mut Span) {
     unsafe { SPAN_SLAB.lock().dealloc_span(span) };
 }

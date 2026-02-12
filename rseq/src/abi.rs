@@ -99,6 +99,12 @@ pub struct Rseq {
 /// Minimum size to pass to the rseq syscall for the original ABI (v0).
 pub const RSEQ_MIN_SIZE: u32 = 32;
 
+impl Default for Rseq {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Rseq {
     /// Create a zeroed, uninitialized rseq area.
     pub const fn new() -> Self {
@@ -141,6 +147,12 @@ pub struct RseqCs {
     /// Address of the abort handler. The 4 bytes immediately before
     /// this address must contain `RSEQ_SIG`.
     pub abort_ip: u64,
+}
+
+impl Default for RseqCs {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RseqCs {

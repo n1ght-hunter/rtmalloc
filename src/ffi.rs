@@ -6,6 +6,7 @@
 //!   - `nightly` → `rstcmalloc_nightly_*`
 //!   - `std`     → `rstcmalloc_std_*`
 //!   - neither   → `rstcmalloc_nostd_*`
+//!
 //! Without `testing`, exports plain `rstcmalloc_*` names.
 
 use crate::allocator::TcMalloc;
@@ -39,6 +40,9 @@ static ALLOC: TcMalloc = TcMalloc;
     ),
     unsafe(export_name = "rstcmalloc_nostd_alloc")
 )]
+/// # Safety
+///
+/// `align` must be a power of two. `size` must be a multiple of `align` or zero.
 pub unsafe extern "C" fn rstcmalloc_alloc(size: usize, align: usize) -> *mut u8 {
     let layout = unsafe { Layout::from_size_align_unchecked(size, align) };
     unsafe { ALLOC.alloc(layout) }
@@ -68,6 +72,9 @@ pub unsafe extern "C" fn rstcmalloc_alloc(size: usize, align: usize) -> *mut u8 
     ),
     unsafe(export_name = "rstcmalloc_nostd_dealloc")
 )]
+/// # Safety
+///
+/// `ptr` must have been returned by `rstcmalloc_alloc` with the same `size`/`align`.
 pub unsafe extern "C" fn rstcmalloc_dealloc(ptr: *mut u8, size: usize, align: usize) {
     let layout = unsafe { Layout::from_size_align_unchecked(size, align) };
     unsafe { ALLOC.dealloc(ptr, layout) }
@@ -97,6 +104,9 @@ pub unsafe extern "C" fn rstcmalloc_dealloc(ptr: *mut u8, size: usize, align: us
     ),
     unsafe(export_name = "rstcmalloc_nostd_realloc")
 )]
+/// # Safety
+///
+/// `ptr` must have been returned by `rstcmalloc_alloc` with the same `size`/`align`.
 pub unsafe extern "C" fn rstcmalloc_realloc(
     ptr: *mut u8,
     size: usize,

@@ -707,7 +707,7 @@ mod summary {
                 let path = entry.path();
                 if path.is_dir() {
                     visit(&path, svgs);
-                } else if path.file_name().map_or(false, |n| n == "violin.svg") {
+                } else if path.file_name().is_some_and(|n| n == "violin.svg") {
                     svgs.push(path);
                 }
             }
@@ -742,18 +742,18 @@ mod summary {
                 // Extract y attribute
                 if let Some(y_start) = tag.find(" y=\"") {
                     let y_str = &tag[y_start + 4..];
-                    if let Some(y_end) = y_str.find('"') {
-                        if let Ok(y) = y_str[..y_end].parse::<f64>() {
-                            // Extract text content (trim whitespace from multi-line SVG)
-                            if let Some(gt) = tag.find('>') {
-                                let text = tag[gt + 1..tag.len() - 7].trim();
-                                // Labels: "group/alloc" or "group/alloc/param"
-                                let parts: Vec<&str> = text.split('/').collect();
-                                if parts.len() >= 2 {
-                                    let alloc_part = parts[1];
-                                    if KNOWN.contains(&alloc_part) {
-                                        label_y.push((alloc_part.to_string(), y));
-                                    }
+                    if let Some(y_end) = y_str.find('"')
+                        && let Ok(y) = y_str[..y_end].parse::<f64>()
+                    {
+                        // Extract text content (trim whitespace from multi-line SVG)
+                        if let Some(gt) = tag.find('>') {
+                            let text = tag[gt + 1..tag.len() - 7].trim();
+                            // Labels: "group/alloc" or "group/alloc/param"
+                            let parts: Vec<&str> = text.split('/').collect();
+                            if parts.len() >= 2 {
+                                let alloc_part = parts[1];
+                                if KNOWN.contains(&alloc_part) {
+                                    label_y.push((alloc_part.to_string(), y));
                                 }
                             }
                         }

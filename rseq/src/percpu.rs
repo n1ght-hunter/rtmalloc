@@ -103,6 +103,7 @@ impl<const NUM_CLASSES: usize> PerCpuSlab<NUM_CLASSES> {
     /// - `region` must point to valid, writable memory of at least
     ///   `num_cpus << shift` bytes.
     /// - The memory must remain valid for the lifetime of the slab.
+    #[allow(clippy::needless_range_loop)]
     pub unsafe fn init(
         &mut self,
         region: *mut u8,

@@ -127,6 +127,12 @@ pub struct ThreadCache {
     max_size: usize,
 }
 
+impl Default for ThreadCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ThreadCache {
     /// Const-constructible ThreadCache with `max_size = 0` as "not initialized" sentinel.
     /// Used with `#[thread_local]` for zero-cost TLS. Call `init()` before first use.
@@ -164,6 +170,10 @@ impl ThreadCache {
 
     /// Flush all cached objects back to the central cache and return budget.
     /// Called on thread exit via the TcFlush guard.
+    ///
+    /// # Safety
+    ///
+    /// Must only be called once per thread cache lifetime (on thread exit).
     pub unsafe fn flush_and_destroy(
         &mut self,
         transfer_cache: &TransferCacheArray,
@@ -201,6 +211,10 @@ impl ThreadCache {
 
     /// Allocate an object of the given size class.
     /// Returns null if allocation fails.
+    ///
+    /// # Safety
+    ///
+    /// `size_class` must be a valid index in `1..NUM_SIZE_CLASSES`.
     #[inline]
     pub unsafe fn allocate(
         &mut self,
@@ -222,6 +236,10 @@ impl ThreadCache {
     }
 
     /// Deallocate an object of the given size class.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must have been returned by a prior `allocate` call for `size_class`.
     #[inline]
     pub unsafe fn deallocate(
         &mut self,

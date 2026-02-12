@@ -110,8 +110,8 @@ fn init_slow() {
 
     // Build per-class capacities from batch_size.
     let mut capacities = [0u16; NUM_SIZE_CLASSES];
-    for class in 1..NUM_SIZE_CLASSES {
-        capacities[class] = size_class::class_info(class).batch_size as u16;
+    for (class, cap) in capacities.iter_mut().enumerate().skip(1) {
+        *cap = size_class::class_info(class).batch_size as u16;
     }
 
     let ok = unsafe {
@@ -278,8 +278,7 @@ unsafe fn refill(
 
     // Walk the linked list and push each pointer into the slab.
     let mut node = head;
-    let mut pushed = 0usize;
-    for _ in 0..count {
+    for (pushed, _) in (0..count).enumerate() {
         if node.is_null() {
             break;
         }
@@ -310,7 +309,6 @@ unsafe fn refill(
             };
             return;
         }
-        pushed += 1;
         node = next;
     }
 }
@@ -335,17 +333,10 @@ unsafe fn drain(
     let mut count = 0usize;
 
     for _ in 0..batch_size {
-        let ptr = loop {
-            match unsafe { CPU_SLAB.get().pop(rseq_ptr, class) } {
-                Some(p) => break Some(p),
-                None => {
-                    // Retry once for abort, then assume empty.
-                    if let Some(p) = unsafe { CPU_SLAB.get().pop(rseq_ptr, class) } {
-                        break Some(p);
-                    }
-                    break None;
-                }
-            }
+        let ptr = match unsafe { CPU_SLAB.get().pop(rseq_ptr, class) } {
+            Some(p) => Some(p),
+            // Retry once for abort, then assume empty.
+            None => unsafe { CPU_SLAB.get().pop(rseq_ptr, class) },
         };
 
         match ptr {

@@ -69,6 +69,12 @@ pub struct TransferCacheArray {
     caches: [SpinMutex<TransferCacheInner>; NUM_SIZE_CLASSES],
 }
 
+impl Default for TransferCacheArray {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TransferCacheArray {
     pub const fn new() -> Self {
         Self {
@@ -78,6 +84,10 @@ impl TransferCacheArray {
 
     /// Remove a batch of objects for the given size class.
     /// Tries transfer cache first (O(1)), falls through to central free list on miss.
+    ///
+    /// # Safety
+    ///
+    /// `size_class` must be a valid index in `1..NUM_SIZE_CLASSES`.
     pub unsafe fn remove_range(
         &self,
         size_class: usize,
@@ -112,6 +122,12 @@ impl TransferCacheArray {
     /// Insert a batch of objects for the given size class.
     /// If count == batch_size, tries transfer cache first (O(1)).
     /// Falls through to central free list if cache is full or count != batch_size.
+    ///
+    /// # Safety
+    ///
+    /// `head` must point to a valid linked list of `count` `FreeObject`s.
+    /// `tail` must be the last node in that list.
+    #[allow(clippy::too_many_arguments)]
     pub unsafe fn insert_range(
         &self,
         size_class: usize,

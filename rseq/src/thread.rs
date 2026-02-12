@@ -260,6 +260,12 @@ pub struct RseqLocal {
 // The pointer it caches is specific to the current thread's rseq area.
 unsafe impl Sync for RseqLocal {}
 
+impl Default for RseqLocal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RseqLocal {
     /// Create an uninitialized handle. Cheap — no syscalls until first use.
     pub const fn new() -> Self {

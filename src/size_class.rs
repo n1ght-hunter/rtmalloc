@@ -320,7 +320,7 @@ pub fn size_to_class(size: usize) -> usize {
         return 0; // Large allocation
     }
     if size <= 1024 {
-        let idx = (size + 7) / 8;
+        let idx = size.div_ceil(8);
         return SMALL_LOOKUP[idx] as usize;
     }
     // For sizes > 1024, do a linear scan of the upper classes.
@@ -421,6 +421,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
     fn test_all_sizes_8_aligned() {
         for cls in 1..NUM_SIZE_CLASSES {
             assert_eq!(
@@ -434,6 +435,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
     fn test_objects_per_span() {
         for cls in 1..NUM_SIZE_CLASSES {
             let info = &SIZE_CLASSES[cls];

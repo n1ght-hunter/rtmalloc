@@ -152,14 +152,14 @@ impl PageMap {
         let alloc_size = (size + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
         let ptr = unsafe { platform::page_alloc(alloc_size) };
         // page_alloc returns zeroed memory, which is valid for AtomicPtr (all null)
-        ptr as *mut MidNode
+        ptr.cast::<MidNode>()
     }
 
     unsafe fn alloc_leaf_node() -> *mut LeafNode {
         let size = core::mem::size_of::<LeafNode>();
         let alloc_size = (size + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
         let ptr = unsafe { platform::page_alloc(alloc_size) };
-        ptr as *mut LeafNode
+        ptr.cast::<LeafNode>()
     }
 }
 

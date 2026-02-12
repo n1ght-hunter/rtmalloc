@@ -33,7 +33,7 @@ use std::sync::Mutex;
 use rseq::{PerCpuSlab, RseqLocal};
 
 thread_local! {
-    static RSEQ: RseqLocal = RseqLocal::new();
+    static RSEQ: RseqLocal = const { RseqLocal::new() };
 }
 
 // ── Size class configuration ────────────────────────────────────────────────
@@ -105,7 +105,7 @@ impl CentralFreeList {
     }
 
     /// Free all remaining blocks back to the system.
-    #[allow(dead_code)]
+    #[allow(dead_code, clippy::needless_range_loop)]
     fn cleanup(&self) {
         for class in 1..NUM_CLASSES {
             let mut list = self.lists[class].lock().unwrap();
@@ -199,17 +199,10 @@ impl PerCpuAllocator {
         let mut batch = Vec::with_capacity(BATCH_SIZE);
 
         for _ in 0..BATCH_SIZE {
-            let ptr = loop {
-                match unsafe { self.slab.pop(rseq_ptr, class) } {
-                    Some(p) => break Some(p),
-                    None => {
-                        // Retry once for abort, then assume empty.
-                        if let Some(p) = unsafe { self.slab.pop(rseq_ptr, class) } {
-                            break Some(p);
-                        }
-                        break None;
-                    }
-                }
+            // Try twice: first attempt may fail due to rseq abort, second confirms empty.
+            let ptr = match unsafe { self.slab.pop(rseq_ptr, class) } {
+                Some(p) => Some(p),
+                None => unsafe { self.slab.pop(rseq_ptr, class) },
             };
             match ptr {
                 Some(p) => batch.push(p),
