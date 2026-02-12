@@ -1,0 +1,49 @@
+name: Benchmark Tracking
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', 'rseq/**', 'bench/**', 'Cargo.toml', 'Cargo.lock']
+
+permissions:
+  contents: write
+  deployments: write
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: rustup show
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: bench-reg-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: bench-reg-
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - run: cargo bench -p rstcmalloc-bench --bench alloc_bench -- --noplot
+
+      - run: |
+          python3 .github/scripts/extract-criterion.py \
+            --head target/criterion \
+            --output-json bench-results.json
+
+      - uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: rstcmalloc Benchmarks
+          tool: 'customSmallerIsBetter'
+          output-file-path: bench-results.json
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          auto-push: true
+          alert-threshold: '115%'
+          comment-on-alert: true
+          alert-comment-cc-users: '@${{ github.repository_owner }}'
+          max-items-in-chart: 100
