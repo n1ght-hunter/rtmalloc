@@ -36,6 +36,14 @@ mod rstcmalloc_ffi {
         fn rstcmalloc_nostd_realloc(ptr: *mut u8, size: usize, align: usize, new_size: usize) -> *mut u8;
     }
 
+    // Per-CPU variant (rseq, Linux x86_64 only)
+    #[cfg(has_rstcmalloc_percpu)]
+    unsafe extern "C" {
+        fn rstcmalloc_percpu_alloc(size: usize, align: usize) -> *mut u8;
+        fn rstcmalloc_percpu_dealloc(ptr: *mut u8, size: usize, align: usize);
+        fn rstcmalloc_percpu_realloc(ptr: *mut u8, size: usize, align: usize, new_size: usize) -> *mut u8;
+    }
+
     macro_rules! impl_ffi_alloc {
         ($name:ident, $alloc:ident, $dealloc:ident, $realloc:ident) => {
             pub struct $name;
@@ -60,9 +68,13 @@ mod rstcmalloc_ffi {
     impl_ffi_alloc!(RstcmallocNightly, rstcmalloc_nightly_alloc, rstcmalloc_nightly_dealloc, rstcmalloc_nightly_realloc);
     impl_ffi_alloc!(RstcmallocStd, rstcmalloc_std_alloc, rstcmalloc_std_dealloc, rstcmalloc_std_realloc);
     impl_ffi_alloc!(RstcmallocNostd, rstcmalloc_nostd_alloc, rstcmalloc_nostd_dealloc, rstcmalloc_nostd_realloc);
+    #[cfg(has_rstcmalloc_percpu)]
+    impl_ffi_alloc!(RstcmallocPercpu, rstcmalloc_percpu_alloc, rstcmalloc_percpu_dealloc, rstcmalloc_percpu_realloc);
 }
 
 use rstcmalloc_ffi::{RstcmallocNightly, RstcmallocNostd, RstcmallocStd};
+#[cfg(has_rstcmalloc_percpu)]
+use rstcmalloc_ffi::RstcmallocPercpu;
 
 // ---------------------------------------------------------------------------
 // Google tcmalloc FFI (statically linked when available)
@@ -112,6 +124,8 @@ use google_tc::GoogleTcMalloc;
 static TCMALLOC_NIGHTLY: RstcmallocNightly = RstcmallocNightly;
 static TCMALLOC_STD: RstcmallocStd = RstcmallocStd;
 static TCMALLOC_NOSTD: RstcmallocNostd = RstcmallocNostd;
+#[cfg(has_rstcmalloc_percpu)]
+static TCMALLOC_PERCPU: RstcmallocPercpu = RstcmallocPercpu;
 static MIMALLOC: MiMalloc = MiMalloc;
 #[cfg(has_google_tcmalloc)]
 static GOOGLE_TC: GoogleTcMalloc = GoogleTcMalloc;
@@ -176,6 +190,10 @@ fn bench_single_alloc_dealloc(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("rstc_nightly", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&TCMALLOC_NIGHTLY, layout) })
         });
+        #[cfg(has_rstcmalloc_percpu)]
+        group.bench_with_input(BenchmarkId::new("rstc_percpu", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&TCMALLOC_PERCPU, layout) })
+        });
         group.bench_with_input(BenchmarkId::new("rstc_std", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&TCMALLOC_STD, layout) })
         });
@@ -209,6 +227,10 @@ fn bench_batch_alloc_free(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("rstc_nightly", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC_NIGHTLY, layout, n) })
         });
+        #[cfg(has_rstcmalloc_percpu)]
+        group.bench_with_input(BenchmarkId::new("rstc_percpu", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC_PERCPU, layout, n) })
+        });
         group.bench_with_input(BenchmarkId::new("rstc_std", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC_STD, layout, n) })
         });
@@ -241,6 +263,10 @@ fn bench_churn(c: &mut Criterion) {
         });
         group.bench_with_input(BenchmarkId::new("rstc_nightly", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&TCMALLOC_NIGHTLY, layout, rounds) })
+        });
+        #[cfg(has_rstcmalloc_percpu)]
+        group.bench_with_input(BenchmarkId::new("rstc_percpu", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&TCMALLOC_PERCPU, layout, rounds) })
         });
         group.bench_with_input(BenchmarkId::new("rstc_std", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&TCMALLOC_STD, layout, rounds) })
@@ -293,6 +319,10 @@ fn bench_vec_push(c: &mut Criterion) {
     });
     group.bench_function("rstc_nightly", |b| {
         b.iter(|| simulate_vec_growth(&TCMALLOC_NIGHTLY, black_box(final_len)))
+    });
+    #[cfg(has_rstcmalloc_percpu)]
+    group.bench_function("rstc_percpu", |b| {
+        b.iter(|| simulate_vec_growth(&TCMALLOC_PERCPU, black_box(final_len)))
     });
     group.bench_function("rstc_std", |b| {
         b.iter(|| simulate_vec_growth(&TCMALLOC_STD, black_box(final_len)))
@@ -354,6 +384,10 @@ fn bench_multithreaded(c: &mut Criterion) {
     group.bench_function("rstc_nightly", |b| {
         b.iter(|| mt_workload(&TCMALLOC_NIGHTLY, nthreads, ops_per_thread))
     });
+    #[cfg(has_rstcmalloc_percpu)]
+    group.bench_function("rstc_percpu", |b| {
+        b.iter(|| mt_workload(&TCMALLOC_PERCPU, nthreads, ops_per_thread))
+    });
     group.bench_function("rstc_std", |b| {
         b.iter(|| mt_workload(&TCMALLOC_STD, nthreads, ops_per_thread))
     });
@@ -399,13 +433,15 @@ mod summary {
 
     const MAGENTA: &str = "\x1b[35m";
     const RED: &str = "\x1b[31m";
+    const BRIGHT_GREEN: &str = "\x1b[92m";
 
-    const KNOWN: &[&str] = &["system", "rstc_nightly", "rstc_std", "rstc_nostd", "mimalloc", "google_tc"];
+    const KNOWN: &[&str] = &["system", "rstc_nightly", "rstc_percpu", "rstc_std", "rstc_nostd", "mimalloc", "google_tc"];
 
     fn color_for(name: &str) -> &'static str {
         match name {
             "system" => WHITE,
             "rstc_nightly" => GREEN,
+            "rstc_percpu" => BRIGHT_GREEN,
             "rstc_std" => MAGENTA,
             "rstc_nostd" => RED,
             "mimalloc" => CYAN,
@@ -515,6 +551,7 @@ mod summary {
         print!("  Legend: ");
         print!("{WHITE}system{RESET}  ");
         print!("{GREEN}rstc_nightly{RESET}  ");
+        print!("{BRIGHT_GREEN}rstc_percpu{RESET}  ");
         print!("{MAGENTA}rstc_std{RESET}  ");
         print!("{RED}rstc_nostd{RESET}  ");
         print!("{CYAN}mimalloc{RESET}  ");
@@ -574,6 +611,7 @@ mod summary {
         match name {
             "system" => "#888888",           // gray
             "rstc_nightly" => "#2ca02c", // green
+            "rstc_percpu" => "#98df8a",  // light green
             "rstc_std" => "#9467bd",     // purple
             "rstc_nostd" => "#d62728",   // red
             "mimalloc" => "#17becf",     // cyan

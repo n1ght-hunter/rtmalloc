@@ -12,18 +12,12 @@ use crate::span::{self, Span, SpanList, SpanState};
 use crate::PAGE_SHIFT;
 use crate::PAGE_SIZE;
 use core::ptr;
+#[cfg(feature = "debug")]
+use std::println;
 
 /// Maximum number of pages tracked in the free list array.
 /// Spans larger than this go into `large_spans`.
 const MAX_PAGES: usize = 128;
-
-#[cfg(feature = "testing")]
-fn _dbg(msg: &[u8]) {
-    unsafe extern "C" {
-        fn write(fd: i32, buf: *const u8, count: usize) -> isize;
-    }
-    unsafe { write(2, msg.as_ptr(), msg.len()) };
-}
 
 pub struct PageHeap {
     /// free_lists[k] holds free spans of exactly k pages (index 0 unused).
@@ -116,8 +110,8 @@ impl PageHeap {
 
         if total > num_pages {
             // Create a remainder span
-            #[cfg(feature = "testing")]
-            _dbg(b"[carve] alloc remainder\n");
+            #[cfg(feature = "debug")]
+            println!("[carve] alloc remainder");
 
             let remainder = span::alloc_span();
             if remainder.is_null() {
@@ -137,29 +131,29 @@ impl PageHeap {
                 // Update original span
                 (*span).num_pages = num_pages;
 
-                #[cfg(feature = "testing")]
-                _dbg(b"[carve] register remainder in pagemap\n");
+                #[cfg(feature = "debug")]
+                println!("[carve] register remainder in pagemap");
 
                 // Register both in pagemap
                 self.pagemap.register_span(remainder);
 
-                #[cfg(feature = "testing")]
-                _dbg(b"[carve] insert remainder in freelist\n");
+                #[cfg(feature = "debug")]
+                println!("[carve] insert remainder in freelist");
 
                 self.insert_free(remainder);
             }
         }
 
-        #[cfg(feature = "testing")]
-        _dbg(b"[carve] register span in pagemap\n");
+        #[cfg(feature = "debug")]
+        println!("[carve] register span in pagemap");
 
         unsafe {
             (*span).state = SpanState::InUse;
             self.pagemap.register_span(span);
         }
 
-        #[cfg(feature = "testing")]
-        _dbg(b"[carve] done\n");
+        #[cfg(feature = "debug")]
+        println!("[carve] done");
 
         span
     }
@@ -200,8 +194,8 @@ impl PageHeap {
         let alloc_pages = num_pages.max(128);
         let alloc_size = alloc_pages * PAGE_SIZE;
 
-        #[cfg(feature = "testing")]
-        _dbg(b"[grow] mmap\n");
+        #[cfg(feature = "debug")]
+        println!("[grow] mmap");
 
         let ptr = unsafe { platform::page_alloc(alloc_size) };
         if ptr.is_null() {
@@ -214,8 +208,8 @@ impl PageHeap {
 
         let start_page = (ptr as usize) >> PAGE_SHIFT;
 
-        #[cfg(feature = "testing")]
-        _dbg(b"[grow] alloc span struct\n");
+        #[cfg(feature = "debug")]
+        println!("[grow] alloc span struct");
 
         let s = span::alloc_span();
         if s.is_null() {
@@ -229,8 +223,8 @@ impl PageHeap {
             (*s).state = SpanState::InUse; // Will be carved immediately
         }
 
-        #[cfg(feature = "testing")]
-        _dbg(b"[grow] carve\n");
+        #[cfg(feature = "debug")]
+        println!("[grow] carve");
 
         // Carve out what we need, remainder goes to free list
         unsafe { self.carve_span(s, num_pages) }

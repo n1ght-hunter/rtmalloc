@@ -15,6 +15,7 @@ nightly = []
 std = []
 ffi = []
 testing = []
+debug = ["std"]
 percpu = ["rseq/nightly", "nightly"]
 
 [dependencies]

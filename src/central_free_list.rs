@@ -13,14 +13,8 @@ use crate::sync::SpinMutex;
 use crate::PAGE_SHIFT;
 use crate::PAGE_SIZE;
 use core::ptr;
-
-#[cfg(feature = "testing")]
-fn _dbg(msg: &[u8]) {
-    unsafe extern "C" {
-        fn write(fd: i32, buf: *const u8, count: usize) -> isize;
-    }
-    unsafe { write(2, msg.as_ptr(), msg.len()) };
-}
+#[cfg(feature = "debug")]
+use std::println;
 
 /// Central free list for a single size class.
 pub struct CentralFreeList {
@@ -158,8 +152,8 @@ impl CentralFreeList {
             (*span).size_class = self.size_class;
             (*span).state = SpanState::InUse;
 
-            #[cfg(feature = "testing")]
-            _dbg(b"[inject] register_span\n");
+            #[cfg(feature = "debug")]
+            println!("[inject] register_span");
 
             pagemap.register_span(span);
 
@@ -167,8 +161,8 @@ impl CentralFreeList {
             let span_bytes = (*span).num_pages * PAGE_SIZE;
             let num_objects = span_bytes / obj_size;
 
-            #[cfg(feature = "testing")]
-            _dbg(b"[inject] build freelist\n");
+            #[cfg(feature = "debug")]
+            println!("[inject] build freelist");
 
             (*span).total_count = num_objects as u32;
             (*span).allocated_count = 0;
@@ -180,8 +174,8 @@ impl CentralFreeList {
                 freelist = obj;
             }
 
-            #[cfg(feature = "testing")]
-            _dbg(b"[inject] done\n");
+            #[cfg(feature = "debug")]
+            println!("[inject] done");
 
             (*span).freelist = freelist;
             self.num_free += num_objects;

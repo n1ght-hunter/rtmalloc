@@ -3,6 +3,7 @@ use std::process::Command;
 
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(has_google_tcmalloc)");
+    println!("cargo::rustc-check-cfg=cfg(has_rstcmalloc_percpu)");
 
     let ws_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -13,21 +14,37 @@ fn main() {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
 
     // =========================================================================
-    // Build rstcmalloc as THREE staticlibs with the `fast` profile:
+    // Build rstcmalloc staticlibs with the `fast` profile:
     //   - nightly (#[thread_local] thread cache): --features nightly,ffi,testing
     //   - std     (std::thread_local! cache):     --features std,ffi,testing
     //   - nostd   (central cache only):           --features ffi,testing
+    //   - percpu  (per-CPU rseq, Linux only):     --features percpu,ffi,testing
     // =========================================================================
 
     build_variant(&cargo, &ws_root, &out_dir, "nightly,ffi,testing", "rstcmalloc_nightly");
     build_variant(&cargo, &ws_root, &out_dir, "std,ffi,testing", "rstcmalloc_std");
     build_variant(&cargo, &ws_root, &out_dir, "ffi,testing", "rstcmalloc_nostd");
 
-    // Link all three variants
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=static=rstcmalloc_nightly");
     println!("cargo:rustc-link-lib=static=rstcmalloc_std");
     println!("cargo:rustc-link-lib=static=rstcmalloc_nostd");
+
+    // Per-CPU variant — only on Linux x86_64 (requires rseq)
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        build_variant(&cargo, &ws_root, &out_dir, "percpu,ffi,testing", "rstcmalloc_percpu");
+        println!("cargo:rustc-link-lib=static=rstcmalloc_percpu");
+        println!("cargo:rustc-cfg=has_rstcmalloc_percpu");
+    }
+
+    // The `std` variant's staticlib bundles a copy of libstd, which conflicts
+    // with the sysroot's libstd that the bench binary also links.  Tell the
+    // linker to tolerate the duplicate symbols (they are identical).
+    #[cfg(windows)]
+    println!("cargo:rustc-link-arg=/FORCE:MULTIPLE");
+    #[cfg(not(windows))]
+    println!("cargo:rustc-link-arg=-Wl,--allow-multiple-definition");
 
     // Windows: VirtualAlloc/VirtualFree live in kernel32
     #[cfg(windows)]
@@ -46,6 +63,9 @@ fn main() {
         .join("vendor")
         .join("gperftools-build")
         .join("Release");
+
+    // Rerun if the vendor lib appears/changes so we pick it up
+    println!("cargo:rerun-if-changed={}", lib_dir.join("tcmalloc_minimal.lib").display());
 
     if lib_dir.join("tcmalloc_minimal.lib").exists() {
         println!("cargo:rustc-cfg=has_google_tcmalloc");
