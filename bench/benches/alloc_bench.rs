@@ -11,8 +11,8 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
 
 use mimalloc::MiMalloc;
-use snmalloc_rs::SnMalloc;
 use rpmalloc::RpMalloc;
+use snmalloc_rs::SnMalloc;
 #[cfg(has_jemalloc)]
 use tikv_jemallocator::Jemalloc;
 

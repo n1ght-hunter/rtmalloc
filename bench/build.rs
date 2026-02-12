@@ -102,10 +102,7 @@ fn main() {
         if lib_exists(&install_lib, "tcmalloc_minimal") {
             println!("cargo:rustc-link-search=native={}", install_lib.display());
         } else if lib_exists(&build_release, "tcmalloc_minimal") {
-            println!(
-                "cargo:rustc-link-search=native={}",
-                build_release.display()
-            );
+            println!("cargo:rustc-link-search=native={}", build_release.display());
         }
 
         println!("cargo:rustc-link-lib=static=tcmalloc_minimal");
@@ -223,8 +220,7 @@ fn try_build_google_tcmalloc(ws_root: &Path) -> bool {
     }
 
     // Verify the library appeared
-    lib_exists(&install_lib, "tcmalloc_minimal")
-        || lib_exists(&build_release, "tcmalloc_minimal")
+    lib_exists(&install_lib, "tcmalloc_minimal") || lib_exists(&build_release, "tcmalloc_minimal")
 }
 
 /// Check if a tool (git, cmake) is available on PATH.
