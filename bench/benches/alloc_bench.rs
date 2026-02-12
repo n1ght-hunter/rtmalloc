@@ -11,6 +11,10 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
 
 use mimalloc::MiMalloc;
+use snmalloc_rs::SnMalloc;
+use rpmalloc::RpMalloc;
+#[cfg(has_jemalloc)]
+use tikv_jemallocator::Jemalloc;
 
 // ---------------------------------------------------------------------------
 // rstcmalloc FFI (statically linked, built by build.rs with --profile fast)
@@ -124,6 +128,7 @@ use rstcmalloc_ffi::{RstcmallocNightly, RstcmallocNostd, RstcmallocStd};
 mod google_tc {
     use std::alloc::{GlobalAlloc, Layout};
 
+    #[allow(clippy::duplicated_attributes)]
     #[link(name = "tcmalloc_minimal", kind = "static")]
     #[link(name = "common", kind = "static")]
     #[link(name = "low_level_alloc", kind = "static")]
@@ -167,6 +172,10 @@ static TCMALLOC_NOSTD: RstcmallocNostd = RstcmallocNostd;
 #[cfg(has_rstcmalloc_percpu)]
 static TCMALLOC_PERCPU: RstcmallocPercpu = RstcmallocPercpu;
 static MIMALLOC: MiMalloc = MiMalloc;
+static SNMALLOC: SnMalloc = SnMalloc;
+static RPMALLOC: RpMalloc = RpMalloc;
+#[cfg(has_jemalloc)]
+static JEMALLOC: Jemalloc = Jemalloc;
 #[cfg(has_google_tcmalloc)]
 static GOOGLE_TC: GoogleTcMalloc = GoogleTcMalloc;
 
@@ -247,6 +256,16 @@ fn bench_single_alloc_dealloc(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("google_tc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&GOOGLE_TC, layout) })
         });
+        group.bench_with_input(BenchmarkId::new("snmalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&SNMALLOC, layout) })
+        });
+        group.bench_with_input(BenchmarkId::new("rpmalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&RPMALLOC, layout) })
+        });
+        #[cfg(has_jemalloc)]
+        group.bench_with_input(BenchmarkId::new("jemalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&JEMALLOC, layout) })
+        });
     }
     group.finish();
 }
@@ -284,6 +303,16 @@ fn bench_batch_alloc_free(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("google_tc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&GOOGLE_TC, layout, n) })
         });
+        group.bench_with_input(BenchmarkId::new("snmalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&SNMALLOC, layout, n) })
+        });
+        group.bench_with_input(BenchmarkId::new("rpmalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&RPMALLOC, layout, n) })
+        });
+        #[cfg(has_jemalloc)]
+        group.bench_with_input(BenchmarkId::new("jemalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&JEMALLOC, layout, n) })
+        });
     }
     group.finish();
 }
@@ -320,6 +349,16 @@ fn bench_churn(c: &mut Criterion) {
         #[cfg(has_google_tcmalloc)]
         group.bench_with_input(BenchmarkId::new("google_tc", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&GOOGLE_TC, layout, rounds) })
+        });
+        group.bench_with_input(BenchmarkId::new("snmalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&SNMALLOC, layout, rounds) })
+        });
+        group.bench_with_input(BenchmarkId::new("rpmalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&RPMALLOC, layout, rounds) })
+        });
+        #[cfg(has_jemalloc)]
+        group.bench_with_input(BenchmarkId::new("jemalloc", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&JEMALLOC, layout, rounds) })
         });
     }
     group.finish();
@@ -376,6 +415,16 @@ fn bench_vec_push(c: &mut Criterion) {
     #[cfg(has_google_tcmalloc)]
     group.bench_function("google_tc", |b| {
         b.iter(|| simulate_vec_growth(&GOOGLE_TC, black_box(final_len)))
+    });
+    group.bench_function("snmalloc", |b| {
+        b.iter(|| simulate_vec_growth(&SNMALLOC, black_box(final_len)))
+    });
+    group.bench_function("rpmalloc", |b| {
+        b.iter(|| simulate_vec_growth(&RPMALLOC, black_box(final_len)))
+    });
+    #[cfg(has_jemalloc)]
+    group.bench_function("jemalloc", |b| {
+        b.iter(|| simulate_vec_growth(&JEMALLOC, black_box(final_len)))
     });
 
     group.finish();
@@ -441,6 +490,16 @@ fn bench_multithreaded(c: &mut Criterion) {
     group.bench_function("google_tc", |b| {
         b.iter(|| mt_workload(&GOOGLE_TC, nthreads, ops_per_thread))
     });
+    group.bench_function("snmalloc", |b| {
+        b.iter(|| mt_workload(&SNMALLOC, nthreads, ops_per_thread))
+    });
+    group.bench_function("rpmalloc", |b| {
+        b.iter(|| mt_workload(&RPMALLOC, nthreads, ops_per_thread))
+    });
+    #[cfg(has_jemalloc)]
+    group.bench_function("jemalloc", |b| {
+        b.iter(|| mt_workload(&JEMALLOC, nthreads, ops_per_thread))
+    });
 
     group.finish();
 }
@@ -474,6 +533,9 @@ mod summary {
     const MAGENTA: &str = "\x1b[35m";
     const RED: &str = "\x1b[31m";
     const BRIGHT_GREEN: &str = "\x1b[92m";
+    const BRIGHT_BLUE: &str = "\x1b[94m";
+    const BRIGHT_CYAN: &str = "\x1b[96m";
+    const BRIGHT_YELLOW: &str = "\x1b[93m";
 
     const KNOWN: &[&str] = &[
         "system",
@@ -483,6 +545,9 @@ mod summary {
         "rstc_nostd",
         "mimalloc",
         "google_tc",
+        "jemalloc",
+        "snmalloc",
+        "rpmalloc",
     ];
 
     fn color_for(name: &str) -> &'static str {
@@ -494,6 +559,9 @@ mod summary {
             "rstc_nostd" => RED,
             "mimalloc" => CYAN,
             "google_tc" => YELLOW,
+            "jemalloc" => BRIGHT_BLUE,
+            "snmalloc" => BRIGHT_CYAN,
+            "rpmalloc" => BRIGHT_YELLOW,
             _ => WHITE,
         }
     }
@@ -614,7 +682,10 @@ mod summary {
         print!("{MAGENTA}rstc_std{RESET}  ");
         print!("{RED}rstc_nostd{RESET}  ");
         print!("{CYAN}mimalloc{RESET}  ");
-        print!("{YELLOW}google_tc{RESET}");
+        print!("{YELLOW}google_tc{RESET}  ");
+        print!("{BRIGHT_BLUE}jemalloc{RESET}  ");
+        print!("{BRIGHT_CYAN}snmalloc{RESET}  ");
+        print!("{BRIGHT_YELLOW}rpmalloc{RESET}");
         println!();
 
         for (group, params) in &groups {
@@ -678,6 +749,9 @@ mod summary {
             "rstc_nostd" => "#d62728",   // red
             "mimalloc" => "#17becf",     // cyan
             "google_tc" => "#ff7f0e",    // orange
+            "jemalloc" => "#1f77b4",     // blue
+            "snmalloc" => "#e377c2",     // pink
+            "rpmalloc" => "#bcbd22",     // olive
             _ => "#1f78b4",              // default blue
         }
     }

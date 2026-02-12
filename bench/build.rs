@@ -4,6 +4,11 @@ use std::process::Command;
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(has_google_tcmalloc)");
     println!("cargo::rustc-check-cfg=cfg(has_rstcmalloc_percpu)");
+    println!("cargo::rustc-check-cfg=cfg(has_jemalloc)");
+
+    // jemalloc is available on non-MSVC targets (Cargo.toml uses target cfg)
+    #[cfg(not(target_env = "msvc"))]
+    println!("cargo:rustc-cfg=has_jemalloc");
 
     let ws_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -79,29 +84,168 @@ fn main() {
     println!("cargo:rerun-if-changed=../Cargo.toml");
 
     // =========================================================================
-    // Google tcmalloc (optional, if vendor build exists)
+    // Google tcmalloc (auto-build from source, optional)
     // =========================================================================
 
-    let lib_dir = ws_root
-        .join("target")
-        .join("vendor")
-        .join("gperftools-build")
-        .join("Release");
+    let vendor = ws_root.join("target").join("vendor");
+    let install_lib = vendor.join("gperftools-install").join("lib");
+    let build_release = vendor.join("gperftools-build").join("Release");
 
     // Rerun if the vendor lib appears/changes so we pick it up
-    println!(
-        "cargo:rerun-if-changed={}",
-        lib_dir.join("tcmalloc_minimal.lib").display()
-    );
+    println!("cargo:rerun-if-changed={}", install_lib.display());
+    println!("cargo:rerun-if-changed={}", build_release.display());
 
-    if lib_dir.join("tcmalloc_minimal.lib").exists() {
+    if try_build_google_tcmalloc(&ws_root) {
         println!("cargo:rustc-cfg=has_google_tcmalloc");
-        println!("cargo:rustc-link-search=native={}", lib_dir.display());
+
+        // Link from whichever location has the library
+        if lib_exists(&install_lib, "tcmalloc_minimal") {
+            println!("cargo:rustc-link-search=native={}", install_lib.display());
+        } else if lib_exists(&build_release, "tcmalloc_minimal") {
+            println!(
+                "cargo:rustc-link-search=native={}",
+                build_release.display()
+            );
+        }
+
         println!("cargo:rustc-link-lib=static=tcmalloc_minimal");
-        println!("cargo:rustc-link-lib=static=common");
-        println!("cargo:rustc-link-lib=static=low_level_alloc");
+
+        // Windows MSVC build also produces common.lib and low_level_alloc.lib
+        #[cfg(windows)]
+        {
+            println!("cargo:rustc-link-lib=static=common");
+            println!("cargo:rustc-link-lib=static=low_level_alloc");
+        }
+
+        // Linux: gperftools needs pthreads
+        #[cfg(not(windows))]
+        println!("cargo:rustc-link-lib=dylib=pthread");
     }
 }
+
+// =========================================================================
+// tcmalloc auto-build helpers
+// =========================================================================
+
+/// Attempt to build Google tcmalloc (gperftools) from source using git + cmake.
+/// Returns true if the library is available (either pre-built or freshly built).
+fn try_build_google_tcmalloc(ws_root: &Path) -> bool {
+    let vendor = ws_root.join("target").join("vendor");
+    let source = vendor.join("gperftools");
+    let build_dir = vendor.join("gperftools-build");
+    let install_dir = vendor.join("gperftools-install");
+    let install_lib = install_dir.join("lib");
+    let build_release = build_dir.join("Release");
+
+    // Already built? Skip.
+    if lib_exists(&install_lib, "tcmalloc_minimal")
+        || lib_exists(&build_release, "tcmalloc_minimal")
+    {
+        return true;
+    }
+
+    // Check for git
+    if !tool_available("git") {
+        println!("cargo:warning=git not found, skipping Google tcmalloc build");
+        return false;
+    }
+
+    // Check for cmake
+    if !tool_available("cmake") {
+        println!("cargo:warning=cmake not found, skipping Google tcmalloc build");
+        return false;
+    }
+
+    // Clone if needed
+    if !source.exists() {
+        println!("cargo:warning=Cloning gperftools (this only happens once)...");
+        let _ = std::fs::create_dir_all(&vendor);
+        let status = Command::new("git")
+            .args([
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                "gperftools-2.18",
+                "https://github.com/gperftools/gperftools.git",
+            ])
+            .arg(&source)
+            .status();
+        match status {
+            Ok(s) if s.success() => {}
+            _ => {
+                println!("cargo:warning=Failed to clone gperftools, skipping tcmalloc");
+                return false;
+            }
+        }
+    }
+
+    // CMake configure
+    println!("cargo:warning=Building Google tcmalloc from source (this only happens once)...");
+    let _ = std::fs::create_dir_all(&build_dir);
+    let status = Command::new("cmake")
+        .arg("-S")
+        .arg(&source)
+        .arg("-B")
+        .arg(&build_dir)
+        .args([
+            "-DCMAKE_BUILD_TYPE=Release",
+            &format!("-DCMAKE_INSTALL_PREFIX={}", install_dir.display()),
+            "-DBUILD_SHARED_LIBS=OFF",
+            "-DBUILD_TESTING=OFF",
+        ])
+        .status();
+    if !matches!(status, Ok(s) if s.success()) {
+        println!("cargo:warning=CMake configure failed for gperftools, skipping tcmalloc");
+        return false;
+    }
+
+    // CMake build
+    let status = Command::new("cmake")
+        .arg("--build")
+        .arg(&build_dir)
+        .args(["--config", "Release", "--parallel"])
+        .status();
+    if !matches!(status, Ok(s) if s.success()) {
+        println!("cargo:warning=CMake build failed for gperftools, skipping tcmalloc");
+        return false;
+    }
+
+    // CMake install
+    let status = Command::new("cmake")
+        .arg("--install")
+        .arg(&build_dir)
+        .args(["--config", "Release"])
+        .status();
+    if !matches!(status, Ok(s) if s.success()) {
+        println!("cargo:warning=CMake install failed for gperftools, skipping tcmalloc");
+        return false;
+    }
+
+    // Verify the library appeared
+    lib_exists(&install_lib, "tcmalloc_minimal")
+        || lib_exists(&build_release, "tcmalloc_minimal")
+}
+
+/// Check if a tool (git, cmake) is available on PATH.
+fn tool_available(name: &str) -> bool {
+    Command::new(name)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Check if a static library exists in the given directory.
+/// Handles both MSVC (.lib) and GNU (.a) naming conventions.
+fn lib_exists(dir: &Path, name: &str) -> bool {
+    dir.join(format!("{name}.lib")).exists() || dir.join(format!("lib{name}.a")).exists()
+}
+
+// =========================================================================
+// rstcmalloc variant builder
+// =========================================================================
 
 fn build_variant(cargo: &str, ws_root: &Path, out_dir: &Path, features: &str, lib_name: &str) {
     let target_dir = out_dir.join(format!("{lib_name}-build"));
