@@ -15,9 +15,11 @@ nightly = []
 std = []
 ffi = []
 testing = []
+percpu = ["rseq/nightly", "nightly"]
 
 [dependencies]
 cfg-if = "1"
+rseq = { path = "rseq", optional = true }
 
 
 [profile.fast]

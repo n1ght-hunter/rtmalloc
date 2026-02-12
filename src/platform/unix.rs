@@ -25,14 +25,16 @@ unsafe extern "C" {
 }
 
 pub unsafe fn page_alloc(size: usize) -> *mut u8 {
-    let ptr = mmap(
-        core::ptr::null_mut(),
-        size,
-        PROT_READ | PROT_WRITE,
-        MAP_PRIVATE | MAP_ANONYMOUS,
-        -1,
-        0,
-    );
+    let ptr = unsafe {
+        mmap(
+            core::ptr::null_mut(),
+            size,
+            PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            -1,
+            0,
+        )
+    };
     if ptr == MAP_FAILED {
         core::ptr::null_mut()
     } else {
@@ -41,9 +43,9 @@ pub unsafe fn page_alloc(size: usize) -> *mut u8 {
 }
 
 pub unsafe fn page_dealloc(ptr: *mut u8, size: usize) {
-    munmap(ptr as *mut c_void, size);
+    unsafe { munmap(ptr as *mut c_void, size) };
 }
 
 pub unsafe fn page_decommit(ptr: *mut u8, size: usize) {
-    madvise(ptr as *mut c_void, size, MADV_DONTNEED);
+    unsafe { madvise(ptr as *mut c_void, size, MADV_DONTNEED) };
 }

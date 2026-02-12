@@ -3,7 +3,8 @@
 //! Static state lives here. The `TcMalloc` struct is zero-sized; all mutable
 //! state is in module-level statics protected by spinlocks or atomics.
 //!
-//! Thread cache strategy (fastest to slowest):
+//! Cache strategy (fastest to slowest):
+//! - `percpu` feature: per-CPU slab via rseq (Linux x86_64, fastest)
 //! - `nightly` feature: `#[thread_local]` for direct TLS (single register read)
 //! - `std` feature: `std::thread_local!` macro (slower TLS, but still cached)
 //! - neither: central free list only (locked, slowest)
@@ -19,14 +20,17 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::ptr;
 
 cfg_if::cfg_if! {
-    if #[cfg(any(feature = "nightly", feature = "std"))] {
+    if #[cfg(feature = "percpu")] {
+        use crate::cpu_cache;
+        use crate::transfer_cache::TransferCacheArray;
+    } else if #[cfg(any(feature = "nightly", feature = "std"))] {
         use crate::thread_cache::ThreadCache;
         use crate::transfer_cache::TransferCacheArray;
     }
 }
 
 cfg_if::cfg_if! {
-    if #[cfg(not(feature = "nightly"))] {
+    if #[cfg(not(any(feature = "nightly", feature = "percpu")))] {
         use crate::span::FreeObject;
     }
 }
@@ -40,7 +44,7 @@ static PAGE_HEAP: SpinMutex<PageHeap> = SpinMutex::new(PageHeap::new(&PAGE_MAP))
 static CENTRAL_CACHE: CentralCache = CentralCache::new();
 
 cfg_if::cfg_if! {
-    if #[cfg(any(feature = "nightly", feature = "std"))] {
+    if #[cfg(any(feature = "percpu", feature = "nightly", feature = "std"))] {
         static TRANSFER_CACHE: TransferCacheArray = TransferCacheArray::new();
     }
 }
@@ -50,7 +54,10 @@ cfg_if::cfg_if! {
 // =============================================================================
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "nightly")] {
+    if #[cfg(feature = "percpu")] {
+        // Per-CPU cache via rseq — no thread-local cache needed.
+        // All state lives in cpu_cache module.
+    } else if #[cfg(feature = "nightly")] {
         // Direct TLS via #[thread_local] — single register read, fastest.
         #[thread_local]
         static mut TC: ThreadCache = ThreadCache::new_const();
@@ -202,7 +209,21 @@ impl TcMalloc {
     // =========================================================================
 
     cfg_if::cfg_if! {
-        if #[cfg(feature = "nightly")] {
+        if #[cfg(feature = "percpu")] {
+            #[inline(always)]
+            unsafe fn alloc_small(&self, class: usize) -> *mut u8 {
+                unsafe {
+                    cpu_cache::alloc(class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
+                }
+            }
+
+            #[inline(always)]
+            unsafe fn dealloc_small(&self, ptr: *mut u8, class: usize) {
+                unsafe {
+                    cpu_cache::dealloc(ptr, class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
+                };
+            }
+        } else if #[cfg(feature = "nightly")] {
             #[inline(always)]
             unsafe fn alloc_small(&self, class: usize) -> *mut u8 {
                 let tc = unsafe { get_tc() };
@@ -256,7 +277,7 @@ impl TcMalloc {
     // =========================================================================
 
     cfg_if::cfg_if! {
-        if #[cfg(not(feature = "nightly"))] {
+        if #[cfg(not(any(feature = "nightly", feature = "percpu")))] {
             unsafe fn alloc_from_central(&self, size_class: usize) -> *mut u8 {
                 let (count, head) = unsafe {
                     CENTRAL_CACHE
