@@ -10,7 +10,8 @@
       "Bash(wsl bash:*)",
       "Bash(cargo clippy:*)",
       "WebFetch(domain:api.github.com)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(cargo check:*)"
     ]
   }
 }

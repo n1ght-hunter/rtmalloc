@@ -117,6 +117,74 @@ fn test_over_aligned_4096() {
 }
 
 #[test]
+fn test_over_aligned_page_size() {
+    // align == PAGE_SIZE (8192): should work via simple alloc_large
+    let align = 8192;
+    for &size in &[8192, 16384, 65536] {
+        let layout = Layout::from_size_align(size, align).unwrap();
+        let ptr = unsafe { GLOBAL.alloc(layout) };
+        assert!(!ptr.is_null(), "alloc failed: size={size}, align={align}");
+        assert_eq!(
+            ptr as usize % align,
+            0,
+            "misaligned: ptr={ptr:?}, size={size}, align={align}"
+        );
+        unsafe { ptr.write_bytes(0xAA, size) };
+        unsafe { GLOBAL.dealloc(ptr, layout) };
+    }
+}
+
+#[test]
+fn test_over_aligned_above_page_size() {
+    // align > PAGE_SIZE: requires over-allocation + trimming
+    for align in [16384, 32768, 65536] {
+        for &size in &[align, align * 2] {
+            let layout = Layout::from_size_align(size, align).unwrap();
+            let ptr = unsafe { GLOBAL.alloc(layout) };
+            assert!(!ptr.is_null(), "alloc failed: size={size}, align={align}");
+            assert_eq!(
+                ptr as usize % align,
+                0,
+                "misaligned: ptr={ptr:?}, size={size}, align={align}"
+            );
+            // Fill and verify
+            unsafe { ptr.write_bytes(0xBE, size) };
+            for i in 0..size {
+                assert_eq!(unsafe { *ptr.add(i) }, 0xBE);
+            }
+            unsafe { GLOBAL.dealloc(ptr, layout) };
+        }
+    }
+}
+
+#[test]
+fn test_many_over_aligned_above_page_size() {
+    // Multiple over-aligned allocations to verify prefix/suffix span recycling
+    let align = 16384;
+    let size = 16384;
+    let layout = Layout::from_size_align(size, align).unwrap();
+
+    let mut ptrs = Vec::with_capacity(20);
+    for _ in 0..20 {
+        let ptr = unsafe { GLOBAL.alloc(layout) };
+        assert!(!ptr.is_null());
+        assert_eq!(ptr as usize % align, 0, "misaligned in batch alloc");
+        unsafe { ptr.write_bytes(0xCF, size) };
+        ptrs.push(ptr);
+    }
+
+    for &ptr in &ptrs {
+        for i in 0..size {
+            assert_eq!(unsafe { *ptr.add(i) }, 0xCF);
+        }
+    }
+
+    for ptr in ptrs {
+        unsafe { GLOBAL.dealloc(ptr, layout) };
+    }
+}
+
+#[test]
 fn test_alignment_realloc_preserves_alignment() {
     for align in [16, 32, 64, 256] {
         let size = align * 2;

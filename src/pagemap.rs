@@ -134,6 +134,24 @@ impl PageMap {
         }
     }
 
+    /// Register only the first and last pages of a free span.
+    ///
+    /// Free spans only need endpoints in the pagemap because coalescing
+    /// only looks at adjacent pages (start-1 and end). This is O(1) vs
+    /// O(n) for `register_span`. Only valid for free spans — in-use spans
+    /// must use `register_span` since dealloc can look up any interior page.
+    ///
+    /// # Safety
+    /// Must be called under external synchronization.
+    pub unsafe fn register_span_endpoints(&self, span: *mut Span) {
+        let start = unsafe { (*span).start_page };
+        let count = unsafe { (*span).num_pages };
+        unsafe { self.set(start, span) };
+        if count > 1 {
+            unsafe { self.set(start + count - 1, span) };
+        }
+    }
+
     /// Unregister a span (set all its pages to null).
     ///
     /// # Safety

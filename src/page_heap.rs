@@ -103,8 +103,9 @@ impl PageHeap {
         // Try to coalesce with the span after this one
         let span = unsafe { self.coalesce_right(span) };
 
-        // Register the (possibly merged) span in the pagemap
-        unsafe { self.pagemap.register_span(span) };
+        // Register endpoints of the free span in the pagemap.
+        // Free spans only need first+last pages registered (for coalescing).
+        unsafe { self.pagemap.register_span_endpoints(span) };
 
         // Insert into the appropriate free list
         unsafe { self.insert_free(span) };
@@ -142,8 +143,8 @@ impl PageHeap {
                 #[cfg(feature = "debug")]
                 println!("[carve] register remainder in pagemap");
 
-                // Register both in pagemap
-                self.pagemap.register_span(remainder);
+                // Free spans only need first+last pages for coalescing
+                self.pagemap.register_span_endpoints(remainder);
 
                 #[cfg(feature = "debug")]
                 println!("[carve] insert remainder in freelist");
