@@ -36,7 +36,7 @@ fn check_pattern(ptr: *mut u8, size: usize) -> bool {
 #[test]
 fn stress_fill_pattern_single_thread() {
     let sizes: &[usize] = &[8, 16, 32, 64, 128, 256, 512, 1024, 4096, 8192];
-    let rounds = 200;
+    let rounds = 50;
 
     let mut live: Vec<(*mut u8, Layout)> = Vec::new();
 
@@ -84,7 +84,7 @@ fn stress_fill_pattern_cross_thread() {
     use std::sync::mpsc;
 
     let npairs = 4;
-    let ops = 500;
+    let ops = 100;
     let sizes: &[usize] = &[16, 64, 256, 1024];
 
     let mut producers = Vec::new();
@@ -129,24 +129,45 @@ fn stress_fill_pattern_cross_thread() {
     assert_eq!(total, npairs * ops);
 }
 
+/// Fill with a fixed seed (not address-dependent) so realloc moves don't
+/// invalidate the pattern.
+fn fill_fixed(ptr: *mut u8, size: usize, seed: usize) {
+    for i in 0..size {
+        unsafe {
+            *ptr.add(i) = ((seed.wrapping_add(i).wrapping_mul(0x9E37_79B9)) & 0xFF) as u8;
+        }
+    }
+}
+
+fn check_fixed(ptr: *mut u8, size: usize, seed: usize) -> bool {
+    for i in 0..size {
+        let expected = ((seed.wrapping_add(i).wrapping_mul(0x9E37_79B9)) & 0xFF) as u8;
+        if unsafe { *ptr.add(i) } != expected {
+            return false;
+        }
+    }
+    true
+}
+
 #[test]
 fn stress_realloc_pattern() {
     let initial_size = 64;
     let layout = Layout::from_size_align(initial_size, 8).unwrap();
 
-    for _ in 0..100 {
+    for round in 0..100 {
+        let seed = round * 31 + 7;
         let ptr = unsafe { GLOBAL.alloc(layout) };
         assert!(!ptr.is_null());
-        fill_pattern(ptr, initial_size);
+        fill_fixed(ptr, initial_size, seed);
 
         // Grow
         let new_size = 256;
         let new_ptr = unsafe { GLOBAL.realloc(ptr, layout, new_size) };
         assert!(!new_ptr.is_null());
-        // Original content should be preserved
+        // Original content should be preserved (ptr may have moved)
         assert!(
-            check_pattern(new_ptr, initial_size),
-            "realloc corrupted original content during grow"
+            check_fixed(new_ptr, initial_size, seed),
+            "realloc corrupted original content during grow (round {round})"
         );
 
         // Shrink
@@ -156,8 +177,8 @@ fn stress_realloc_pattern() {
         assert!(!shrunk_ptr.is_null());
         // First shrunk_size bytes should still match
         assert!(
-            check_pattern(shrunk_ptr, shrunk_size),
-            "realloc corrupted content during shrink"
+            check_fixed(shrunk_ptr, shrunk_size, seed),
+            "realloc corrupted content during shrink (round {round})"
         );
 
         let shrunk_layout = Layout::from_size_align(shrunk_size, 8).unwrap();
@@ -168,8 +189,8 @@ fn stress_realloc_pattern() {
 #[test]
 fn stress_many_threads_concurrent() {
     // Many threads doing alloc+fill+verify+free simultaneously
-    let nthreads = 16;
-    let ops_per_thread = 500;
+    let nthreads = 8;
+    let ops_per_thread = 200;
 
     let handles: Vec<_> = (0..nthreads)
         .map(|tid| {

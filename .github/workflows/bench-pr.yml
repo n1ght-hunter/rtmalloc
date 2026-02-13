@@ -21,13 +21,17 @@ jobs:
 
       - run: rustup show
 
+      - name: Install cmake
+        run: sudo apt-get update && sudo apt-get install -y cmake
+
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: bench-reg-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: bench-reg-
+            target
+          key: bench-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: bench-${{ runner.os }}-
 
       - uses: actions/setup-python@v5
         with:

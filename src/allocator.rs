@@ -137,22 +137,27 @@ unsafe impl GlobalAlloc for TcMalloc {
 
     #[inline]
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        let size = layout.size();
-        if size == 0 {
+        if layout.size() == 0 {
             return;
         }
 
-        let align = layout.align();
-
-        if align <= 8 {
-            let class = size_class::size_to_class(size);
-            if class != 0 {
-                unsafe { self.dealloc_small(ptr, class) };
-                return;
-            }
+        // Look up the actual size class from the span metadata, like tcmalloc.
+        // We cannot trust layout.size() because realloc may return the same
+        // pointer for a shrink (staying in-place when new_size fits in the
+        // existing size class), so the caller's layout may not match the
+        // span's real size class.
+        let page_id = (ptr as usize) >> PAGE_SHIFT;
+        let span = PAGE_MAP.get(page_id);
+        if span.is_null() {
+            return;
         }
 
-        unsafe { self.dealloc_slow(ptr) };
+        let sc = unsafe { (*span).size_class };
+        if sc != 0 {
+            unsafe { self.dealloc_small(ptr, sc) };
+        } else {
+            unsafe { PAGE_HEAP.lock().deallocate_span(span) };
+        }
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
@@ -180,13 +185,11 @@ unsafe impl GlobalAlloc for TcMalloc {
             let old_class = size_class::size_to_class(layout.size());
             if old_class != 0 {
                 let current_size = size_class::class_to_size(old_class);
+                // Fits in current allocation — return same pointer
                 if new_size <= current_size {
                     return ptr;
                 }
-                let new_class = size_class::size_to_class(new_size);
-                if new_class == old_class {
-                    return ptr;
-                }
+                // Must grow — allocate, copy, free
                 let new_layout =
                     unsafe { Layout::from_size_align_unchecked(new_size, layout.align()) };
                 let new_ptr = unsafe { self.alloc(new_layout) };
@@ -308,23 +311,6 @@ impl TcMalloc {
     // =========================================================================
     // Slow paths (shared by all tiers)
     // =========================================================================
-
-    #[cold]
-    unsafe fn dealloc_slow(&self, ptr: *mut u8) {
-        let page_id = (ptr as usize) >> PAGE_SHIFT;
-        let span = PAGE_MAP.get(page_id);
-        if span.is_null() {
-            return;
-        }
-
-        let sc = unsafe { (*span).size_class };
-
-        if sc == 0 {
-            unsafe { PAGE_HEAP.lock().deallocate_span(span) };
-        } else {
-            unsafe { self.dealloc_small(ptr, sc) };
-        }
-    }
 
     #[cold]
     unsafe fn realloc_slow(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
