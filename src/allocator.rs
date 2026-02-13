@@ -5,8 +5,8 @@
 //!
 //! Cache strategy (fastest to slowest):
 //! - `percpu` feature: per-CPU slab via rseq (Linux x86_64, fastest)
-//! - `nightly` feature: `#[thread_local]` for direct TLS (single register read)
-//! - `std` feature: `std::thread_local!` macro (slower TLS, but still cached)
+//! - `nightly` feature: `#[thread_local]` with const-init (single TLS read, no branches)
+//! - `std` feature: `std::thread_local!` with const-init (no lazy init overhead)
 //! - neither: central free list only (locked, slowest)
 
 use crate::PAGE_SHIFT;
@@ -29,8 +29,10 @@ cfg_if::cfg_if! {
     }
 }
 
+use crate::span;
+
 cfg_if::cfg_if! {
-    if #[cfg(not(any(feature = "nightly", feature = "percpu")))] {
+    if #[cfg(not(feature = "percpu"))] {
         use crate::span::FreeObject;
     }
 }
@@ -39,13 +41,13 @@ cfg_if::cfg_if! {
 // Global static state
 // =============================================================================
 
-static PAGE_MAP: PageMap = PageMap::new();
-static PAGE_HEAP: SpinMutex<PageHeap> = SpinMutex::new(PageHeap::new(&PAGE_MAP));
-static CENTRAL_CACHE: CentralCache = CentralCache::new();
+pub(crate) static PAGE_MAP: PageMap = PageMap::new();
+pub(crate) static PAGE_HEAP: SpinMutex<PageHeap> = SpinMutex::new(PageHeap::new(&PAGE_MAP));
+pub(crate) static CENTRAL_CACHE: CentralCache = CentralCache::new();
 
 cfg_if::cfg_if! {
     if #[cfg(any(feature = "percpu", feature = "nightly", feature = "std"))] {
-        static TRANSFER_CACHE: TransferCacheArray = TransferCacheArray::new();
+        pub(crate) static TRANSFER_CACHE: TransferCacheArray = TransferCacheArray::new();
     }
 }
 
@@ -56,38 +58,91 @@ cfg_if::cfg_if! {
 cfg_if::cfg_if! {
     if #[cfg(feature = "percpu")] {
         // Per-CPU cache via rseq — no thread-local cache needed.
-        // All state lives in cpu_cache module.
     } else if #[cfg(feature = "nightly")] {
-        // Direct TLS via #[thread_local] — single register read, fastest.
-        #[thread_local]
-        static mut TC: ThreadCache = ThreadCache::new_const();
-
-        #[inline(always)]
-        unsafe fn get_tc() -> &'static mut ThreadCache {
-            let tc = unsafe { &mut *ptr::addr_of_mut!(TC) };
-            if !tc.is_initialized() {
-                tc_init_cold(tc);
-            }
-            tc
+        #[derive(Clone, Copy, PartialEq)]
+        #[repr(u8)]
+        enum TlsState {
+            Uninitialized = 0,
+            Active = 1,
+            Destroyed = 2,
         }
 
+        struct TlsSlot<T> {
+            state: TlsState,
+            content: T,
+        }
+
+        /// Get a raw mutable pointer to the thread-local ThreadCache.
+        #[inline(always)]
+        unsafe fn tc() -> *mut ThreadCache {
+            unsafe { core::ptr::addr_of_mut!(TC.content) }
+        }
+
+        #[thread_local]
+        static mut TC: TlsSlot<ThreadCache> = TlsSlot {
+            state: TlsState::Uninitialized,
+            content: ThreadCache::new_const(),
+        };
+
+        /// Flush the ThreadCache and mark TC as Destroyed (reentrancy-safe).
+        #[cold]
+        #[allow(dead_code)] // Only called from cleanup modules (std feature)
+        unsafe fn tc_destroy() {
+            unsafe {
+                if TC.state == TlsState::Active {
+                    TC.state = TlsState::Destroyed;
+                    (*tc()).flush_and_destroy(
+                        &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP,
+                    );
+                }
+            }
+        }
+
+        /// Initialize the thread-local ThreadCache.
         #[cold]
         #[inline(never)]
-        fn tc_init_cold(tc: &mut ThreadCache) {
-            tc.init();
-        }
-    } else if #[cfg(feature = "std")] {
-        // std::thread_local! — slower TLS access, but still thread-cached.
-        std::thread_local! {
-            static THREAD_CACHE: core::cell::UnsafeCell<ThreadCache> =
-                core::cell::UnsafeCell::new(ThreadCache::new());
+        unsafe fn tc_init() {
+            unsafe { (*tc()).init() };
+            // Set BEFORE cleanup registration — if register() triggers allocation,
+            // the reentrant call sees TC as Active and uses it normally.
+            unsafe { TC.state = TlsState::Active };
+            tc_cleanup::register();
         }
 
-        #[inline]
-        fn with_thread_cache<R>(f: impl FnOnce(&mut ThreadCache) -> R) -> Option<R> {
-            THREAD_CACHE
-                .try_with(|cell| unsafe { f(&mut *cell.get()) })
-                .ok()
+        // -- Cleanup: nightly + std --
+        #[cfg(feature = "std")]
+        mod tc_cleanup {
+            struct Guard;
+
+            impl Drop for Guard {
+                fn drop(&mut self) {
+                    if unsafe { super::TC.state } == super::TlsState::Active {
+                        unsafe { super::tc_destroy() };
+                    }
+                }
+            }
+
+            std::thread_local! {
+                static GUARD: Guard = const { Guard };
+            }
+
+            pub(super) fn register() {
+                // Use try_with: if std's TLS is already destroyed (rare edge case
+                // during thread shutdown), silently skip — the ThreadCache leaks.
+                let _ = GUARD.try_with(|_| {});
+            }
+        }
+
+        // -- Cleanup: nightly, no std --
+        #[cfg(not(feature = "std"))]
+        mod tc_cleanup {
+            pub(super) fn register() {}
+        }
+    } else if #[cfg(feature = "std")] {
+        std::thread_local! {
+            static TC_CELL: core::cell::UnsafeCell<ThreadCache> = const {
+                core::cell::UnsafeCell::new(ThreadCache::new_const())
+            };
         }
     }
 }
@@ -125,7 +180,7 @@ unsafe impl GlobalAlloc for RtMalloc {
             let class = size_class::size_to_class(effective_size);
             if class != 0 {
                 let class_size = size_class::class_to_size(class);
-                if !class_size.is_multiple_of(align) {
+                if align > PAGE_SIZE || !class_size.is_multiple_of(align) {
                     return unsafe { self.alloc_large(layout) };
                 }
                 return unsafe { self.alloc_small(class) };
@@ -179,30 +234,36 @@ unsafe impl GlobalAlloc for RtMalloc {
             return layout.align() as *mut u8;
         }
 
-        let align = layout.align();
-
-        if align <= 8 {
-            let old_class = size_class::size_to_class(layout.size());
-            if old_class != 0 {
-                let current_size = size_class::class_to_size(old_class);
-                // Fits in current allocation — return same pointer
-                if new_size <= current_size {
-                    return ptr;
-                }
-                // Must grow — allocate, copy, free
-                let new_layout =
-                    unsafe { Layout::from_size_align_unchecked(new_size, layout.align()) };
-                let new_ptr = unsafe { self.alloc(new_layout) };
-                if !new_ptr.is_null() {
-                    let copy_size = layout.size().min(new_size);
-                    unsafe { ptr::copy_nonoverlapping(ptr, new_ptr, copy_size) };
-                    unsafe { self.dealloc(ptr, layout) };
-                }
-                return new_ptr;
+        // Look up the REAL allocation size from span metadata, like tcmalloc.
+        // We cannot trust layout.size() because prior reallocs may have returned
+        // the same pointer for an in-place shrink, so the caller's layout may
+        // carry a smaller size than the span's actual size class.
+        let page_id = (ptr as usize) >> PAGE_SHIFT;
+        let span = PAGE_MAP.get(page_id);
+        let old_usable = if !span.is_null() {
+            let sc = unsafe { (*span).size_class };
+            if sc != 0 {
+                size_class::class_to_size(sc)
+            } else {
+                (unsafe { (*span).num_pages }) * PAGE_SIZE
             }
+        } else {
+            layout.size() // Defensive fallback
+        };
+
+        // Fits in current allocation — return same pointer
+        if new_size <= old_usable {
+            return ptr;
         }
 
-        unsafe { self.realloc_slow(ptr, layout, new_size) }
+        // Must grow — allocate, copy, free
+        let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, layout.align()) };
+        let new_ptr = unsafe { self.alloc(new_layout) };
+        if !new_ptr.is_null() {
+            unsafe { ptr::copy_nonoverlapping(ptr, new_ptr, old_usable.min(new_size)) };
+            unsafe { self.dealloc(ptr, layout) };
+        }
+        new_ptr
     }
 }
 
@@ -229,35 +290,58 @@ impl RtMalloc {
         } else if #[cfg(feature = "nightly")] {
             #[inline(always)]
             unsafe fn alloc_small(&self, class: usize) -> *mut u8 {
-                let tc = unsafe { get_tc() };
-                unsafe { tc.allocate(class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP) }
+                if unsafe { TC.state } == TlsState::Active {
+                    return unsafe {
+                        (*tc())
+                            .allocate(class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
+                    };
+                }
+                unsafe { self.alloc_small_slow(class) }
+            }
+
+            #[cold]
+            #[inline(never)]
+            unsafe fn alloc_small_slow(&self, class: usize) -> *mut u8 {
+                if unsafe { TC.state } == TlsState::Uninitialized {
+                    unsafe { tc_init() };
+                    return unsafe {
+                        (*tc())
+                            .allocate(class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
+                    };
+                }
+                unsafe { self.alloc_from_central(class) }
             }
 
             #[inline(always)]
             unsafe fn dealloc_small(&self, ptr: *mut u8, class: usize) {
-                let tc = unsafe { get_tc() };
-                unsafe {
-                    tc.deallocate(ptr, class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
-                };
+                if unsafe { TC.state } == TlsState::Active {
+                    unsafe {
+                        (*tc())
+                            .deallocate(ptr, class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP);
+                    }
+                    return;
+                }
+                unsafe { self.dealloc_to_central(ptr, class) };
             }
         } else if #[cfg(feature = "std")] {
             #[inline(always)]
             unsafe fn alloc_small(&self, class: usize) -> *mut u8 {
-                if let Some(ptr) = with_thread_cache(|tc| unsafe {
+                match TC_CELL.try_with(|cell| unsafe {
+                    let tc = &mut *cell.get();
                     tc.allocate(class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
                 }) {
-                    ptr
-                } else {
-                    unsafe { self.alloc_from_central(class) }
+                    Ok(ptr) => ptr,
+                    Err(_) => unsafe { self.alloc_from_central(class) },
                 }
             }
 
             #[inline(always)]
             unsafe fn dealloc_small(&self, ptr: *mut u8, class: usize) {
-                if with_thread_cache(|tc| unsafe {
-                    tc.deallocate(ptr, class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
+                if TC_CELL.try_with(|cell| unsafe {
+                    let tc = &mut *cell.get();
+                    tc.deallocate(ptr, class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP);
                 })
-                .is_none()
+                .is_err()
                 {
                     unsafe { self.dealloc_to_central(ptr, class) };
                 }
@@ -280,7 +364,7 @@ impl RtMalloc {
     // =========================================================================
 
     cfg_if::cfg_if! {
-        if #[cfg(not(any(feature = "nightly", feature = "percpu")))] {
+        if #[cfg(not(feature = "percpu"))] {
             unsafe fn alloc_from_central(&self, size_class: usize) -> *mut u8 {
                 let (count, head) = unsafe {
                     CENTRAL_CACHE
@@ -312,65 +396,72 @@ impl RtMalloc {
     // Slow paths (shared by all tiers)
     // =========================================================================
 
-    #[cold]
-    unsafe fn realloc_slow(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        let page_id = (ptr as usize) >> PAGE_SHIFT;
-        let span = PAGE_MAP.get(page_id);
-        if !span.is_null() {
-            let sc = unsafe { (*span).size_class };
-            if sc != 0 {
-                let current_size = size_class::class_to_size(sc);
-                let effective_new = new_size.max(layout.align());
-                let new_class = size_class::size_to_class(effective_new);
-                if new_class == sc {
-                    return ptr;
-                }
-                if new_size <= current_size {
-                    return ptr;
-                }
-            } else {
-                let span_bytes = unsafe { (*span).num_pages } * PAGE_SIZE;
-                if new_size <= span_bytes {
-                    return ptr;
-                }
-            }
-        }
-
-        let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, layout.align()) };
-        let new_ptr = unsafe { self.alloc(new_layout) };
-        if !new_ptr.is_null() {
-            let copy_size = layout.size().min(new_size);
-            unsafe { ptr::copy_nonoverlapping(ptr, new_ptr, copy_size) };
-            unsafe { self.dealloc(ptr, layout) };
-        }
-        new_ptr
-    }
-
     unsafe fn alloc_large(&self, layout: Layout) -> *mut u8 {
         let size = layout.size();
         let align = layout.align();
+        let size_pages = size.div_ceil(PAGE_SIZE);
 
-        let pages = size.div_ceil(PAGE_SIZE);
-        let span = unsafe { PAGE_HEAP.lock().allocate_span(pages) };
+        if align <= PAGE_SIZE {
+            // Page alignment is sufficient — simple allocation
+            let span = unsafe { PAGE_HEAP.lock().allocate_span(size_pages) };
+            if span.is_null() {
+                return ptr::null_mut();
+            }
+            unsafe {
+                (*span).size_class = 0;
+                PAGE_MAP.register_span(span);
+            }
+            return unsafe { (*span).start_addr() };
+        }
+
+        // Over-aligned: align > PAGE_SIZE.
+        // Over-allocate to guarantee an aligned region exists within.
+        // Like tcmalloc's do_memalign: allocate extra, trim prefix/suffix.
+        let align_pages = align / PAGE_SIZE;
+        let total_pages = size_pages + align_pages - 1;
+
+        let mut heap = PAGE_HEAP.lock();
+        let span = unsafe { heap.allocate_span(total_pages) };
         if span.is_null() {
             return ptr::null_mut();
         }
 
+        let start_addr = unsafe { (*span).start_addr() } as usize;
+        let aligned_addr = (start_addr + align - 1) & !(align - 1);
+        let prefix_pages = (aligned_addr - start_addr) / PAGE_SIZE;
+        let suffix_pages = total_pages - prefix_pages - size_pages;
+
         unsafe {
+            // Clear pagemap entries for the original span
+            PAGE_MAP.unregister_span(span);
+
+            // Return prefix pages to page heap
+            if prefix_pages > 0 {
+                let prefix = span::alloc_span();
+                if !prefix.is_null() {
+                    (*prefix).start_page = (*span).start_page;
+                    (*prefix).num_pages = prefix_pages;
+                    heap.deallocate_span(prefix);
+                }
+            }
+
+            // Resize main span to the aligned region
+            (*span).start_page += prefix_pages;
+            (*span).num_pages = size_pages;
             (*span).size_class = 0;
             PAGE_MAP.register_span(span);
+
+            // Return suffix pages to page heap
+            if suffix_pages > 0 {
+                let suffix = span::alloc_span();
+                if !suffix.is_null() {
+                    (*suffix).start_page = (*span).start_page + size_pages;
+                    (*suffix).num_pages = suffix_pages;
+                    heap.deallocate_span(suffix);
+                }
+            }
         }
 
-        let addr = unsafe { (*span).start_addr() };
-
-        if align <= PAGE_SIZE {
-            return addr;
-        }
-
-        if (addr as usize).is_multiple_of(align) {
-            return addr;
-        }
-
-        addr
+        aligned_addr as *mut u8
     }
 }
