@@ -33,6 +33,8 @@ jobs:
         with:
           python-version: '3.x'
 
+      - run: pip install matplotlib
+
       # ---- base branch ----
       - run: git checkout ${{ github.event.pull_request.base.sha }}
       - run: cargo bench -p rstcmalloc-bench --bench alloc_bench -- --noplot
@@ -48,7 +50,20 @@ jobs:
           python3 .github/scripts/extract-criterion.py \
             --base target/criterion-base \
             --head target/criterion \
-            --output-comment bench-comment.md
+            --output-comment bench-comment.md \
+            --output-charts bench-charts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-charts
+          path: bench-charts/
+          retention-days: 30
+
+      - name: Append chart link to comment
+        run: |
+          ARTIFACT_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          printf '\n\n---\n' >> bench-comment.md
+          printf '**Benchmark charts:** [Download SVGs](%s) (under Artifacts)\n' "$ARTIFACT_URL" >> bench-comment.md
 
       - uses: marocchino/sticky-pull-request-comment@v2
         with:
