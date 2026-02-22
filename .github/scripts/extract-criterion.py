@@ -469,8 +469,13 @@ def _generate_index_html(svg_files, output_dir):
         " border-radius: 8px; padding: 16px; margin: 24px 0; }",
         "  .chart img { width: 100%; height: auto; }",
         "  .timestamp { color: #999; font-size: 0.85em; }",
+        "  .breadcrumb { color: #888; margin-bottom: 0.5em; }",
+        "  .breadcrumb a { color: #3273dc; text-decoration: none; }",
+        "  .breadcrumb a:hover { text-decoration: underline; }",
         "</style>",
         "</head><body>",
+        '<div class="breadcrumb">'
+        '<a href="../../">rtmalloc</a> / <a href="../">dev</a> / charts</div>',
         "<h1>rtmalloc Benchmark Charts</h1>",
         '<p class="timestamp">Generated from latest main branch push</p>',
     ]
