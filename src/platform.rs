@@ -2,12 +2,17 @@
 //!
 //! Provides `page_alloc` and `page_dealloc` that wrap platform-specific
 //! virtual memory APIs (VirtualAlloc on Windows, mmap on Unix).
+//! Under Miri, uses std::alloc as a backing store instead.
 
-#[cfg(windows)]
-mod windows;
-
-#[cfg(unix)]
-mod unix;
+cfg_if::cfg_if! {
+    if #[cfg(miri)] {
+        mod miri;
+    } else if #[cfg(windows)] {
+        mod windows;
+    } else if #[cfg(unix)] {
+        mod unix;
+    }
+}
 
 /// Allocate `size` bytes of virtual memory, page-aligned.
 /// Returns null on failure. Memory is zero-initialized by the OS.
@@ -18,13 +23,14 @@ mod unix;
 /// same `size` (before rounding).
 #[inline]
 pub unsafe fn page_alloc(size: usize) -> *mut u8 {
-    #[cfg(windows)]
-    {
-        unsafe { windows::page_alloc(size) }
-    }
-    #[cfg(unix)]
-    {
-        unsafe { unix::page_alloc(size) }
+    cfg_if::cfg_if! {
+        if #[cfg(miri)] {
+            unsafe { miri::page_alloc(size) }
+        } else if #[cfg(windows)] {
+            unsafe { windows::page_alloc(size) }
+        } else if #[cfg(unix)] {
+            unsafe { unix::page_alloc(size) }
+        }
     }
 }
 
@@ -34,14 +40,16 @@ pub unsafe fn page_alloc(size: usize) -> *mut u8 {
 /// `ptr` must have been returned by `page_alloc`, and `size` must match
 /// the original allocation size.
 #[inline]
-pub unsafe fn page_dealloc(ptr: *mut u8, _size: usize) {
-    #[cfg(windows)]
-    {
-        unsafe { windows::page_dealloc(ptr) };
-    }
-    #[cfg(unix)]
-    {
-        unsafe { unix::page_dealloc(ptr, _size) };
+pub unsafe fn page_dealloc(ptr: *mut u8, size: usize) {
+    cfg_if::cfg_if! {
+        if #[cfg(miri)] {
+            unsafe { miri::page_dealloc(ptr, size) }
+        } else if #[cfg(windows)] {
+            let _ = size;
+            unsafe { windows::page_dealloc(ptr) }
+        } else if #[cfg(unix)] {
+            unsafe { unix::page_dealloc(ptr, size) }
+        }
     }
 }
 
@@ -52,13 +60,14 @@ pub unsafe fn page_dealloc(ptr: *mut u8, _size: usize) {
 /// `ptr` and `size` must refer to a range within a live `page_alloc` allocation.
 #[inline]
 pub unsafe fn page_decommit(ptr: *mut u8, size: usize) {
-    #[cfg(windows)]
-    {
-        unsafe { windows::page_decommit(ptr, size) };
-    }
-    #[cfg(unix)]
-    {
-        unsafe { unix::page_decommit(ptr, size) };
+    cfg_if::cfg_if! {
+        if #[cfg(miri)] {
+            unsafe { miri::page_decommit(ptr, size) }
+        } else if #[cfg(windows)] {
+            unsafe { windows::page_decommit(ptr, size) }
+        } else if #[cfg(unix)] {
+            unsafe { unix::page_decommit(ptr, size) }
+        }
     }
 }
 
@@ -69,15 +78,16 @@ pub unsafe fn page_decommit(ptr: *mut u8, size: usize) {
 /// that was previously decommitted.
 #[inline]
 pub unsafe fn page_recommit(ptr: *mut u8, size: usize) {
-    #[cfg(windows)]
-    {
-        unsafe { windows::page_recommit(ptr, size) };
-    }
-    #[cfg(unix)]
-    {
-        // On Unix, madvise MADV_DONTNEED doesn't unmap, so accessing the
-        // pages again automatically recommits them. Nothing to do.
-        let _ = (ptr, size);
+    cfg_if::cfg_if! {
+        if #[cfg(miri)] {
+            unsafe { miri::page_recommit(ptr, size) }
+        } else if #[cfg(windows)] {
+            unsafe { windows::page_recommit(ptr, size) }
+        } else if #[cfg(unix)] {
+            // madvise MADV_DONTNEED doesn't unmap, so accessing the
+            // pages again automatically recommits them. Nothing to do.
+            let _ = (ptr, size);
+        }
     }
 }
 
@@ -91,15 +101,12 @@ mod tests {
         unsafe {
             let ptr = page_alloc(PAGE_SIZE);
             assert!(!ptr.is_null());
-            // Memory should be zero-initialized
             for i in 0..PAGE_SIZE {
                 assert_eq!(*ptr.add(i), 0);
             }
-            // Write a pattern
             for i in 0..PAGE_SIZE {
                 *ptr.add(i) = (i & 0xFF) as u8;
             }
-            // Read it back
             for i in 0..PAGE_SIZE {
                 assert_eq!(*ptr.add(i), (i & 0xFF) as u8);
             }
@@ -113,7 +120,6 @@ mod tests {
             let size = PAGE_SIZE * 8;
             let ptr = page_alloc(size);
             assert!(!ptr.is_null());
-            // Write and read back
             *ptr = 0xAA;
             *ptr.add(size - 1) = 0xBB;
             assert_eq!(*ptr, 0xAA);

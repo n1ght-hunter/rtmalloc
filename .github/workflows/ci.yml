@@ -27,6 +27,21 @@ jobs:
       - run: cargo test -p rtmalloc
       - run: cargo test -p rseq
 
+  miri:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install nightly --component miri
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: miri-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: miri-${{ runner.os }}-
+      - run: MIRIFLAGS="-Zmiri-ignore-leaks -Zmiri-permissive-provenance" cargo +nightly miri test -p rtmalloc --lib
+
   test-all-features:
     if: github.event_name == 'merge_group' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
