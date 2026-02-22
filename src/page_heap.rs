@@ -32,21 +32,10 @@ pub struct PageHeap {
 // point to OS-allocated memory that outlives any thread.
 unsafe impl Send for PageHeap {}
 
-/// Helper to create a const array of SpanLists.
-const fn new_span_list_array<const N: usize>() -> [SpanList; N] {
-    let mut arr = [const { SpanList::new() }; N];
-    let mut i = 0;
-    while i < N {
-        arr[i] = SpanList::new();
-        i += 1;
-    }
-    arr
-}
-
 impl PageHeap {
     pub const fn new(pagemap: &'static PageMap) -> Self {
         Self {
-            free_lists: new_span_list_array(),
+            free_lists: [const { SpanList::new() }; MAX_PAGES + 1],
             large_spans: SpanList::new(),
             pagemap,
         }
@@ -98,16 +87,13 @@ impl PageHeap {
             (*span).total_count = 0;
         }
 
-        // Try to coalesce with the span before this one
         let span = unsafe { self.coalesce_left(span) };
-        // Try to coalesce with the span after this one
         let span = unsafe { self.coalesce_right(span) };
 
         // Register endpoints of the free span in the pagemap.
         // Free spans only need first+last pages registered (for coalescing).
         unsafe { self.pagemap.register_span_endpoints(span) };
 
-        // Insert into the appropriate free list
         unsafe { self.insert_free(span) };
     }
 
@@ -118,7 +104,6 @@ impl PageHeap {
         assert!(total >= num_pages);
 
         if total > num_pages {
-            // Create a remainder span
             #[cfg(feature = "debug")]
             println!("[carve] alloc remainder");
 
@@ -208,7 +193,6 @@ impl PageHeap {
 
         let ptr = unsafe { platform::page_alloc(alloc_size) };
         if ptr.is_null() {
-            // Try exact size as fallback
             if alloc_pages > num_pages {
                 return unsafe { self.grow_heap_exact(num_pages) };
             }
@@ -235,7 +219,6 @@ impl PageHeap {
         #[cfg(feature = "debug")]
         println!("[grow] carve");
 
-        // Carve out what we need, remainder goes to free list
         unsafe { self.carve_span(s, num_pages) }
     }
 

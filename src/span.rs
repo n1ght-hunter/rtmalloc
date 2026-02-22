@@ -148,10 +148,6 @@ impl SpanList {
     }
 }
 
-// =============================================================================
-// Span Slab Allocator
-// =============================================================================
-
 /// Allocates Span structs from OS pages, avoiding use of the main allocator.
 /// Uses bump allocation within slabs, with a free list for recycled spans.
 struct SpanSlabInner {

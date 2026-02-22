@@ -52,12 +52,10 @@ impl CentralFreeList {
         page_heap: &SpinMutex<PageHeap>,
         pagemap: &PageMap,
     ) -> (usize, *mut FreeObject) {
-        // Collect objects from spans, populating new spans as needed
         let mut head: *mut FreeObject = ptr::null_mut();
         let mut count = 0;
 
         while count < batch_size {
-            // If we have no free objects, populate a new span
             if self.nonempty_spans.is_empty() {
                 unsafe { self.populate(page_heap, pagemap) };
                 if self.nonempty_spans.is_empty() {
@@ -77,7 +75,6 @@ impl CentralFreeList {
                     self.num_free -= 1;
                 }
 
-                // If span has no more free objects, remove from nonempty list
                 if (*span).freelist.is_null() {
                     self.nonempty_spans.remove(span);
                 }
@@ -108,7 +105,6 @@ impl CentralFreeList {
             unsafe { head = (*obj).next };
             remaining -= 1;
 
-            // Find which span this object belongs to
             let page_id = (obj as usize) >> PAGE_SHIFT;
             let span = pagemap.get(page_id);
             if span.is_null() {
@@ -194,10 +190,6 @@ impl CentralFreeList {
     }
 }
 
-// =============================================================================
-// Lock-dropping wrappers
-// =============================================================================
-
 /// Remove up to `batch_size` objects, dropping the central lock during page heap calls.
 ///
 /// This prevents threads wanting the same size class from blocking while another
@@ -259,7 +251,6 @@ pub unsafe fn remove_range_dropping_lock(
             let mut cfl = cfl_lock.lock();
             unsafe { cfl.inject_span(span, pagemap) };
         }
-        // Loop back to collect from newly injected span
     }
 }
 
