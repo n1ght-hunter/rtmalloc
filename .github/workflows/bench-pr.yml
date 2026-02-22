@@ -1,18 +1,50 @@
 name: Benchmark PR
 on:
-  pull_request:
-    branches: [main]
-    paths: ['src/**', 'rseq/**', 'bench/**', 'Cargo.toml', 'Cargo.lock']
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
 
 concurrency:
-  group: bench-pr-${{ github.event.pull_request.number }}
+  group: bench-pr-${{ github.event.workflow_run.pull_requests[0].number || github.run_id }}
   cancel-in-progress: true
 
 permissions:
   pull-requests: write
 
 jobs:
+  check-paths:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+      pr-number: ${{ steps.pr.outputs.number }}
+      head-sha: ${{ steps.pr.outputs.head_sha }}
+      base-sha: ${{ steps.pr.outputs.base_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: pr
+        run: |
+          echo "number=${{ github.event.workflow_run.pull_requests[0].number }}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          echo "base_sha=${{ github.event.workflow_run.pull_requests[0].base.sha }}" >> "$GITHUB_OUTPUT"
+      - id: filter
+        run: |
+          BASE="${{ steps.pr.outputs.base_sha }}"
+          HEAD="${{ steps.pr.outputs.head_sha }}"
+          CHANGED=$(git diff --name-only "$BASE"..."$HEAD" 2>/dev/null || echo "FORCE_RUN")
+          if echo "$CHANGED" | grep -qE '^(src/|rseq/|bench/|Cargo\.(toml|lock)$)|FORCE_RUN'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   benchmark:
+    needs: check-paths
+    if: needs.check-paths.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,9 +52,6 @@ jobs:
           fetch-depth: 0
 
       - run: rustup show
-
-      - name: Install cmake
-        run: sudo apt-get update && sudo apt-get install -y cmake
 
       - uses: actions/cache@v4
         with:
@@ -33,43 +62,71 @@ jobs:
           key: bench-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: bench-${{ runner.os }}-
 
+      # Cache mimalloc-bench build
+      - uses: actions/cache@v4
+        id: mimalloc-bench-cache
+        with:
+          path: mimalloc-bench
+          key: mimalloc-bench-${{ runner.os }}-v1
+
+      - name: Clone and build mimalloc-bench
+        if: steps.mimalloc-bench-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/daanx/mimalloc-bench.git
+          cd mimalloc-bench
+          ./build-bench-env.sh all
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      - run: pip install matplotlib
-
-      # ---- base branch ----
-      - run: git checkout ${{ github.event.pull_request.base.sha }}
-      - run: cargo bench -p rtmalloc-bench --bench alloc_bench -- --noplot
-      - run: cp -r target/criterion target/criterion-base
-
-      # ---- PR branch ----
-      - run: git checkout ${{ github.event.pull_request.head.sha }}
-      - run: rm -rf target/criterion
-      - run: cargo bench -p rtmalloc-bench --bench alloc_bench -- --noplot
-
-      # ---- compare & comment ----
-      - run: |
-          python3 .github/scripts/extract-criterion.py \
-            --base target/criterion-base \
-            --head target/criterion \
-            --output-comment bench-comment.md \
-            --output-charts bench-charts
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-charts
-          path: bench-charts/
-          retention-days: 30
-
-      - name: Append chart link to comment
+      # ---- Build rtmalloc .so from base (main) ----
+      - name: Build base allocators
         run: |
-          ARTIFACT_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          printf '\n\n---\n' >> bench-comment.md
-          printf '**Benchmark charts:** [Download SVGs](%s) (under Artifacts)\n' "$ARTIFACT_URL" >> bench-comment.md
+          git checkout ${{ needs.check-paths.outputs.base-sha }}
+          cargo rustc -p rtmalloc --features c-abi,nightly --crate-type cdylib --profile fast
+          cp target/fast/librtmalloc.so librtmalloc_nightly_base.so
+          cargo rustc -p rtmalloc --features c-abi,std --crate-type cdylib --profile fast
+          cp target/fast/librtmalloc.so librtmalloc_std_base.so
+
+      # ---- Build rtmalloc .so from head (PR) ----
+      - name: Build head allocators
+        run: |
+          git checkout ${{ needs.check-paths.outputs.head-sha }}
+          cargo rustc -p rtmalloc --features c-abi,nightly --crate-type cdylib --profile fast
+          cp target/fast/librtmalloc.so librtmalloc_nightly_head.so
+          cargo rustc -p rtmalloc --features c-abi,std --crate-type cdylib --profile fast
+          cp target/fast/librtmalloc.so librtmalloc_std_head.so
+
+      # ---- Run mimalloc-bench ----
+      - name: Run benchmarks
+        run: |
+          cd mimalloc-bench/out/bench
+
+          # Create external allocators file with absolute paths
+          REPO_ROOT="${{ github.workspace }}"
+          cat > "$REPO_ROOT/ext.txt" <<EOF
+          rt_nightly_base $REPO_ROOT/librtmalloc_nightly_base.so
+          rt_nightly $REPO_ROOT/librtmalloc_nightly_head.so
+          rt_std_base $REPO_ROOT/librtmalloc_std_base.so
+          rt_std $REPO_ROOT/librtmalloc_std_head.so
+          EOF
+
+          ../../bench.sh --external="$REPO_ROOT/ext.txt" mi allt
+
+          cp benchres.csv "$REPO_ROOT/benchres.csv"
+
+      # ---- Parse and comment ----
+      - name: Generate comparison
+        run: |
+          git checkout ${{ needs.check-paths.outputs.head-sha }}
+          python3 .github/scripts/parse-mimalloc-bench.py \
+            --csv benchres.csv \
+            --base-prefix _base \
+            --output-comment bench-comment.md
 
       - uses: marocchino/sticky-pull-request-comment@v2
         with:
-          header: benchmark-comparison
+          header: mimalloc-bench-comparison
           path: bench-comment.md
+          number: ${{ needs.check-paths.outputs.pr-number }}

@@ -1,15 +1,37 @@
 name: Benchmark Tracking
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
-    paths: ['src/**', 'rseq/**', 'bench/**', 'Cargo.toml', 'Cargo.lock']
 
 permissions:
   contents: write
   deployments: write
 
 jobs:
-  benchmark:
+  check-paths:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: filter
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "FORCE_RUN")
+          if echo "$CHANGED" | grep -qE '^(src/|rseq/|bench/|Cargo\.(toml|lock)$)|FORCE_RUN'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---- Criterion microbenchmarks ----
+  criterion:
+    needs: check-paths
+    if: needs.check-paths.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +66,7 @@ jobs:
 
       - uses: benchmark-action/github-action-benchmark@v1
         with:
-          name: rtmalloc Benchmarks
+          name: rtmalloc Criterion Benchmarks
           tool: 'customSmallerIsBetter'
           output-file-path: bench-results.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -56,7 +78,7 @@ jobs:
           alert-comment-cc-users: '@${{ github.repository_owner }}'
           max-items-in-chart: 100
 
-      - name: Deploy charts to gh-pages
+      - name: Deploy Criterion charts to gh-pages
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -67,5 +89,100 @@ jobs:
           cd gh-pages-worktree
           git add dev/charts/
           git diff --cached --quiet && echo "No chart changes" && exit 0
-          git commit -m "Update benchmark charts for ${{ github.sha }}"
+          git commit -m "Update Criterion charts for ${{ github.sha }}"
+          git push origin gh-pages
+
+  # ---- mimalloc-bench real-world programs ----
+  mimalloc-bench:
+    needs: check-paths
+    if: needs.check-paths.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: rustup show
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: bench-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: bench-${{ runner.os }}-
+
+      - uses: actions/cache@v4
+        id: mimalloc-bench-cache
+        with:
+          path: mimalloc-bench
+          key: mimalloc-bench-${{ runner.os }}-v1
+
+      - name: Clone and build mimalloc-bench
+        if: steps.mimalloc-bench-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/daanx/mimalloc-bench.git
+          cd mimalloc-bench
+          ./build-bench-env.sh all
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - run: pip install matplotlib
+
+      # Build rtmalloc .so variants
+      - name: Build rtmalloc shared libraries
+        run: |
+          cargo rustc -p rtmalloc --features c-abi,nightly --crate-type cdylib --profile fast
+          cp target/fast/librtmalloc.so librtmalloc_nightly.so
+          cargo rustc -p rtmalloc --features c-abi,std --crate-type cdylib --profile fast
+          cp target/fast/librtmalloc.so librtmalloc_std.so
+
+      - name: Run mimalloc-bench
+        run: |
+          cd mimalloc-bench/out/bench
+
+          REPO_ROOT="${{ github.workspace }}"
+          cat > "$REPO_ROOT/ext.txt" <<EOF
+          rt_nightly $REPO_ROOT/librtmalloc_nightly.so
+          rt_std $REPO_ROOT/librtmalloc_std.so
+          EOF
+
+          ../../bench.sh --external="$REPO_ROOT/ext.txt" mi allt
+
+          cp benchres.csv "$REPO_ROOT/benchres.csv"
+
+      - name: Parse results
+        run: |
+          python3 .github/scripts/parse-mimalloc-bench.py \
+            --csv benchres.csv \
+            --output-json mimalloc-bench-results.json \
+            --output-charts mimalloc-bench-charts
+
+      - uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: rtmalloc mimalloc-bench
+          tool: 'customSmallerIsBetter'
+          output-file-path: mimalloc-bench-results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench-mimalloc
+          auto-push: true
+          alert-threshold: '115%'
+          comment-on-alert: true
+          alert-comment-cc-users: '@${{ github.repository_owner }}'
+          max-items-in-chart: 100
+
+      - name: Deploy mimalloc-bench charts to gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin gh-pages:gh-pages
+          git worktree add gh-pages-worktree gh-pages
+          mkdir -p gh-pages-worktree/dev/charts-mimalloc
+          cp mimalloc-bench-charts/*.svg mimalloc-bench-charts/index.html gh-pages-worktree/dev/charts-mimalloc/ 2>/dev/null || true
+          cd gh-pages-worktree
+          git add dev/charts-mimalloc/
+          git diff --cached --quiet && echo "No chart changes" && exit 0
+          git commit -m "Update mimalloc-bench charts for ${{ github.sha }}"
           git push origin gh-pages
