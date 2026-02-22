@@ -10,7 +10,7 @@ use core::cell::UnsafeCell;
 use core::ptr;
 use core::sync::atomic::{AtomicPtr, Ordering};
 
-use rseq::{PerCpuSlab, RseqLocal};
+use rseq::PerCpuSlab;
 
 use crate::central_free_list::CentralCache;
 use crate::page_heap::PageHeap;
@@ -65,8 +65,12 @@ static SLAB_REGION: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
 /// Protects one-time initialization.
 static INIT_LOCK: SpinMutex<()> = SpinMutex::new(());
 
+/// Cached rseq pointer for the fast path.
+///
+/// Non-null means: slab is initialized AND rseq is available on this thread.
+/// The fast path is a single TLS load + null branch — no atomics.
 #[thread_local]
-static RSEQ: RseqLocal = RseqLocal::new();
+static mut CACHED_RSEQ: *mut rseq::Rseq = ptr::null_mut();
 
 /// Ensure the per-CPU slab is initialized. After the first call, this is
 /// just a single atomic load (fast path).
@@ -121,8 +125,8 @@ fn init_slow() {
 
 /// Allocate an object of the given size class via the per-CPU cache.
 ///
-/// Fast path: rseq pop (no locks, no atomics).
-/// Slow path: refill from transfer cache, then retry.
+/// Fast path: single TLS load + inlined rseq pop (no locks, no atomics).
+/// Slow path: init or refill from transfer cache.
 ///
 /// # Safety
 ///
@@ -136,40 +140,81 @@ pub unsafe fn alloc(
     page_heap: &SpinMutex<PageHeap>,
     pagemap: &PageMap,
 ) -> *mut u8 {
+    let rseq_ptr = unsafe { CACHED_RSEQ };
+    if !rseq_ptr.is_null() {
+        // Fast path: try popping from the slab.
+        unsafe {
+            if let Some(ptr) = CPU_SLAB.get().pop(rseq_ptr, class) {
+                return ptr;
+            }
+            // Could be rseq abort — retry once.
+            if let Some(ptr) = CPU_SLAB.get().pop(rseq_ptr, class) {
+                return ptr;
+            }
+        }
+        // Slab empty — refill and retry.
+        return unsafe {
+            alloc_refill(class, rseq_ptr, transfer_cache, central, page_heap, pagemap)
+        };
+    }
+    // Not yet initialized on this thread.
+    unsafe { alloc_init(class, transfer_cache, central, page_heap, pagemap) }
+}
+
+/// Cold path: first allocation on this thread. Initialize slab + rseq,
+/// cache the rseq pointer, then allocate.
+#[cold]
+#[inline(never)]
+unsafe fn alloc_init(
+    class: usize,
+    transfer_cache: &TransferCacheArray,
+    central: &CentralCache,
+    page_heap: &SpinMutex<PageHeap>,
+    pagemap: &PageMap,
+) -> *mut u8 {
     ensure_init();
 
-    // If slab init failed, go straight to central.
     if !CPU_SLAB.get().is_initialized() {
         return unsafe { alloc_from_central(class, transfer_cache, central, page_heap, pagemap) };
     }
 
-    let rseq_ptr = match RSEQ.rseq_ptr() {
+    let rseq_ptr = match unsafe { rseq::current_rseq() } {
         Some(p) => p,
         None => {
-            // rseq unavailable — fall through to central.
             return unsafe {
                 alloc_from_central(class, transfer_cache, central, page_heap, pagemap)
             };
         }
     };
 
-    // Fast path: try popping from the slab.
+    // Cache for all future calls on this thread.
+    unsafe { CACHED_RSEQ = rseq_ptr };
+
     unsafe {
         if let Some(ptr) = CPU_SLAB.get().pop(rseq_ptr, class) {
             return ptr;
         }
-        // Could be rseq abort — retry once.
         if let Some(ptr) = CPU_SLAB.get().pop(rseq_ptr, class) {
             return ptr;
         }
+        alloc_refill(class, rseq_ptr, transfer_cache, central, page_heap, pagemap)
     }
+}
 
-    // Slow path: slab is empty, refill and retry.
+/// Cold path: slab was empty, refill from transfer cache then retry.
+#[cold]
+#[inline(never)]
+unsafe fn alloc_refill(
+    class: usize,
+    rseq_ptr: *mut rseq::Rseq,
+    transfer_cache: &TransferCacheArray,
+    central: &CentralCache,
+    page_heap: &SpinMutex<PageHeap>,
+    pagemap: &PageMap,
+) -> *mut u8 {
     unsafe {
         refill(class, rseq_ptr, transfer_cache, central, page_heap, pagemap);
 
-        // After refill, try to pop. If still empty (OOM or migration),
-        // fall back to central allocation.
         if let Some(ptr) = CPU_SLAB.get().pop(rseq_ptr, class) {
             return ptr;
         }
@@ -182,8 +227,8 @@ pub unsafe fn alloc(
 
 /// Free an object back to the per-CPU cache.
 ///
-/// Fast path: rseq push (no locks, no atomics).
-/// Slow path: drain excess to transfer cache, then retry.
+/// Fast path: single TLS load + inlined rseq push (no locks, no atomics).
+/// Slow path: init or drain excess to transfer cache.
 ///
 /// # Safety
 ///
@@ -198,39 +243,100 @@ pub unsafe fn dealloc(
     page_heap: &SpinMutex<PageHeap>,
     pagemap: &PageMap,
 ) {
+    let rseq_ptr = unsafe { CACHED_RSEQ };
+    if !rseq_ptr.is_null() {
+        // Fast path: push onto the slab.
+        unsafe {
+            if CPU_SLAB.get().push(rseq_ptr, class, ptr).is_some() {
+                return;
+            }
+            // Could be rseq abort — retry once.
+            if CPU_SLAB.get().push(rseq_ptr, class, ptr).is_some() {
+                return;
+            }
+        }
+        // Slab full — drain and retry.
+        unsafe {
+            dealloc_drain(
+                ptr,
+                class,
+                rseq_ptr,
+                transfer_cache,
+                central,
+                page_heap,
+                pagemap,
+            )
+        };
+        return;
+    }
+    // Not yet initialized on this thread.
+    unsafe { dealloc_init(ptr, class, transfer_cache, central, page_heap, pagemap) }
+}
+
+/// Cold path: first dealloc on this thread. Initialize slab + rseq,
+/// cache the rseq pointer, then free.
+#[cold]
+#[inline(never)]
+unsafe fn dealloc_init(
+    ptr: *mut u8,
+    class: usize,
+    transfer_cache: &TransferCacheArray,
+    central: &CentralCache,
+    page_heap: &SpinMutex<PageHeap>,
+    pagemap: &PageMap,
+) {
     ensure_init();
 
-    // If slab init failed, go straight to central.
     if !CPU_SLAB.get().is_initialized() {
         unsafe { dealloc_to_central(ptr, class, transfer_cache, central, page_heap, pagemap) };
         return;
     }
 
-    let rseq_ptr = match RSEQ.rseq_ptr() {
+    let rseq_ptr = match unsafe { rseq::current_rseq() } {
         Some(p) => p,
         None => {
-            // rseq unavailable — return directly to central.
             unsafe { dealloc_to_central(ptr, class, transfer_cache, central, page_heap, pagemap) };
             return;
         }
     };
 
-    // Fast path: push onto the slab.
+    // Cache for all future calls on this thread.
+    unsafe { CACHED_RSEQ = rseq_ptr };
+
     unsafe {
         if CPU_SLAB.get().push(rseq_ptr, class, ptr).is_some() {
             return;
         }
-        // Could be rseq abort — retry once.
         if CPU_SLAB.get().push(rseq_ptr, class, ptr).is_some() {
             return;
         }
+        dealloc_drain(
+            ptr,
+            class,
+            rseq_ptr,
+            transfer_cache,
+            central,
+            page_heap,
+            pagemap,
+        )
     }
+}
 
-    // Slow path: slab is full, drain then retry.
+/// Cold path: slab was full, drain to transfer cache then retry.
+#[cold]
+#[inline(never)]
+unsafe fn dealloc_drain(
+    ptr: *mut u8,
+    class: usize,
+    rseq_ptr: *mut rseq::Rseq,
+    transfer_cache: &TransferCacheArray,
+    central: &CentralCache,
+    page_heap: &SpinMutex<PageHeap>,
+    pagemap: &PageMap,
+) {
     unsafe {
         drain(class, rseq_ptr, transfer_cache, central, page_heap, pagemap);
 
-        // After drain, try to push. If still full (migration), fall back.
         if CPU_SLAB.get().push(rseq_ptr, class, ptr).is_some() {
             return;
         }

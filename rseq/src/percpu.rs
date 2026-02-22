@@ -194,7 +194,7 @@ impl<const NUM_CLASSES: usize> PerCpuSlab<NUM_CLASSES> {
     ///
     /// - `rseq` must be a valid, registered rseq pointer for the current thread.
     /// - `class` must be `< NUM_CLASSES` and have been initialized.
-    #[inline(never)]
+    #[inline(always)]
     pub unsafe fn pop(&self, rseq: *mut Rseq, class: usize) -> Option<*mut u8> {
         let class_off = (class * 4) as u64;
         let begin = self.begins[class] as u64;
@@ -293,7 +293,7 @@ impl<const NUM_CLASSES: usize> PerCpuSlab<NUM_CLASSES> {
     /// - `rseq` must be a valid, registered rseq pointer for the current thread.
     /// - `class` must be `< NUM_CLASSES` and have been initialized.
     /// - `ptr` must be a valid pointer that was previously allocated.
-    #[inline(never)]
+    #[inline(always)]
     pub unsafe fn push(&self, rseq: *mut Rseq, class: usize, ptr: *mut u8) -> Option<()> {
         let class_off = (class * 4) as u64;
         let slabs = self.slabs as u64;
