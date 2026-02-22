@@ -19,6 +19,7 @@ The main reasons for this are:
 - [ ] Implement a per cpu arena design for small allocations using rseq experimental
 - [ ] Benchmark and make sure rtmalloc nightly is within 1% the speed of tcmalloc 
 - [ ] Impl profiling with an output to have custom class sizes for better cache performance
+- [ ] Find a way to run Miri without explicit `MIRIFLAGS` (currently needs `-Zmiri-ignore-leaks -Zmiri-permissive-provenance` because caching allocators hold memory in free lists and use integer↔pointer casts internally)
 
 ## Benchmarks
 
