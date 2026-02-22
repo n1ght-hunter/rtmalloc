@@ -6,7 +6,6 @@
       "Bash(cargo test:*)",
       "Bash(cargo bench:*)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(wsl bash -lc \"cd /mnt/e/programming/rust/rstcmalloc && cargo test --features percpu --test basic -- --test-threads=1 --skip test_hashmap 2>&1\")",
       "Bash(wsl bash:*)",
       "Bash(cargo clippy:*)",
       "WebFetch(domain:api.github.com)",
