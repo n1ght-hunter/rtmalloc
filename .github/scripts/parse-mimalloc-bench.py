@@ -198,6 +198,19 @@ def generate_json(groups, output_path):
     print(f"Wrote {len(entries)} entries to {output_path}")
 
 
+def generate_bmf_json(groups, output_path):
+    """Generate Bencher Metric Format (BMF) JSON for bencher.dev."""
+    bmf = {}
+    for bench, alloc_map in sorted(groups.items()):
+        for alloc_name, row in sorted(alloc_map.items()):
+            if alloc_name not in TRACKED_ALLOCATORS:
+                continue
+            bmf[f"{bench}/{alloc_name}"] = {"elapsed": {"value": round(row["elapsed"], 4)}}
+    with open(output_path, "w") as f:
+        json.dump(bmf, f, indent=2)
+    print(f"Wrote {len(bmf)} BMF entries to {output_path}")
+
+
 def generate_charts(groups, output_dir):
     """Generate SVG bar charts comparing allocators per benchmark."""
     if not HAS_MATPLOTLIB:
@@ -255,7 +268,8 @@ def main():
     parser.add_argument("--base-prefix", default="_base",
                         help="Suffix identifying base allocator names (default: _base)")
     parser.add_argument("--output-comment", help="Write Markdown comparison to this file")
-    parser.add_argument("--output-json", help="Write dashboard JSON to this file")
+    parser.add_argument("--output-json", help="Write dashboard JSON to this file (github-action-benchmark format)")
+    parser.add_argument("--output-bmf", help="Write Bencher Metric Format JSON to this file (bencher.dev)")
     parser.add_argument("--output-charts", help="Write SVG charts to this directory")
     args = parser.parse_args()
 
@@ -272,6 +286,9 @@ def main():
 
     if args.output_json:
         generate_json(groups, args.output_json)
+
+    if args.output_bmf:
+        generate_bmf_json(groups, args.output_bmf)
 
     if args.output_charts:
         generate_charts(groups, args.output_charts)

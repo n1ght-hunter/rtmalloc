@@ -6,8 +6,8 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
-  deployments: write
+  contents: read
+  checks: write
 
 jobs:
   check-paths:
@@ -50,47 +50,22 @@ jobs:
           key: bench-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: bench-${{ runner.os }}-
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
+      - uses: bencherdev/bencher@main
 
-      - run: pip install matplotlib
-
-      - run: cargo bench -p rtmalloc-bench --bench alloc_bench -- --noplot
-
-      - run: |
-          python3 .github/scripts/extract-criterion.py \
-            --head target/criterion \
-            --output-json bench-results.json \
-            --output-charts bench-charts
-
-      - uses: benchmark-action/github-action-benchmark@v1
-        with:
-          name: rtmalloc Criterion Benchmarks
-          tool: 'customSmallerIsBetter'
-          output-file-path: bench-results.json
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          gh-pages-branch: gh-pages
-          benchmark-data-dir-path: dev/bench
-          auto-push: true
-          alert-threshold: '115%'
-          comment-on-alert: true
-          alert-comment-cc-users: '@${{ github.repository_owner }}'
-          max-items-in-chart: 100
-
-      - name: Deploy Criterion charts to gh-pages
+      - name: Track Criterion benchmarks
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin gh-pages:gh-pages
-          git worktree add gh-pages-worktree gh-pages
-          mkdir -p gh-pages-worktree/dev/charts
-          cp bench-charts/*.svg bench-charts/index.html gh-pages-worktree/dev/charts/
-          cd gh-pages-worktree
-          git add dev/charts/
-          git diff --cached --quiet && echo "No chart changes" && exit 0
-          git commit -m "Update Criterion charts for ${{ github.sha }}"
-          git push origin gh-pages
+          bencher run \
+            --project rtmalloc \
+            --token '${{ secrets.BENCHER_API_TOKEN }}' \
+            --branch main \
+            --testbed github-actions \
+            --adapter rust_criterion \
+            --thresholds-reset \
+            --err \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            --ci-only-on-alert \
+            "cargo bench -p rtmalloc-bench --bench alloc_bench -- --noplot"
+
 
   # ---- mimalloc-bench real-world programs ----
   mimalloc-bench:
@@ -124,13 +99,6 @@ jobs:
           cd mimalloc-bench
           ./build-bench-env.sh all
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - run: pip install matplotlib
-
-      # Build rtmalloc .so variants
       - name: Build rtmalloc shared libraries
         run: |
           cargo rustc -p rtmalloc --features c-abi,nightly --crate-type cdylib --profile fast
@@ -152,37 +120,26 @@ jobs:
 
           cp benchres.csv "$REPO_ROOT/benchres.csv"
 
+      - uses: astral-sh/setup-uv@v5
+
       - name: Parse results
         run: |
-          python3 .github/scripts/parse-mimalloc-bench.py \
+          uv run .github/scripts/parse-mimalloc-bench.py \
             --csv benchres.csv \
-            --output-json mimalloc-bench-results.json \
-            --output-charts mimalloc-bench-charts
+            --output-bmf mimalloc-bench-results-bmf.json
 
-      - uses: benchmark-action/github-action-benchmark@v1
-        with:
-          name: rtmalloc mimalloc-bench
-          tool: 'customSmallerIsBetter'
-          output-file-path: mimalloc-bench-results.json
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          gh-pages-branch: gh-pages
-          benchmark-data-dir-path: dev/bench-mimalloc
-          auto-push: true
-          alert-threshold: '115%'
-          comment-on-alert: true
-          alert-comment-cc-users: '@${{ github.repository_owner }}'
-          max-items-in-chart: 100
+      - uses: bencherdev/bencher@main
 
-      - name: Deploy mimalloc-bench charts to gh-pages
+      - name: Track mimalloc-bench results
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin gh-pages:gh-pages
-          git worktree add gh-pages-worktree gh-pages
-          mkdir -p gh-pages-worktree/dev/charts-mimalloc
-          cp mimalloc-bench-charts/*.svg mimalloc-bench-charts/index.html gh-pages-worktree/dev/charts-mimalloc/ 2>/dev/null || true
-          cd gh-pages-worktree
-          git add dev/charts-mimalloc/
-          git diff --cached --quiet && echo "No chart changes" && exit 0
-          git commit -m "Update mimalloc-bench charts for ${{ github.sha }}"
-          git push origin gh-pages
+          bencher run \
+            --project rtmalloc \
+            --token '${{ secrets.BENCHER_API_TOKEN }}' \
+            --branch main \
+            --testbed github-actions \
+            --adapter json \
+            --file mimalloc-bench-results-bmf.json \
+            --thresholds-reset \
+            --err \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            --ci-only-on-alert
