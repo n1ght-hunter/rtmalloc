@@ -1,7 +1,7 @@
 #![no_std]
 #![cfg_attr(feature = "nightly", feature(thread_local))]
 
-//! rstcmalloc: A tcmalloc-style memory allocator for Rust.
+//! rtmalloc: A tcmalloc-style memory allocator for Rust.
 //!
 //! Implements Google's tcmalloc architecture with three tiers:
 //! - Thread-local caches (fast path, no locks) — requires `nightly` feature
@@ -12,7 +12,7 @@
 //!
 //! ```ignore
 //! #[global_allocator]
-//! static GLOBAL: rstcmalloc::TcMalloc = rstcmalloc::TcMalloc;
+//! static GLOBAL: rtmalloc::RtMalloc = rtmalloc::RtMalloc;
 //! ```
 
 #[cfg(test)]
@@ -40,7 +40,7 @@ pub const PAGE_SHIFT: usize = 13;
 pub const PAGE_SIZE: usize = 1 << PAGE_SHIFT;
 
 // Re-export the allocator at crate root for convenience
-pub use allocator::TcMalloc;
+pub use allocator::RtMalloc;
 
 // Panic handler for staticlib builds (no_std has no default panic handler).
 // Only active when panic="abort" (i.e., the `fast` profile), not during normal checks.

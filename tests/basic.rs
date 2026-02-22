@@ -1,10 +1,10 @@
-//! Basic integration test: use rstcmalloc as the global allocator and exercise
+//! Basic integration test: use rtmalloc as the global allocator and exercise
 //! standard Rust collections.
 
-use rstcmalloc::TcMalloc;
+use rtmalloc::RtMalloc;
 
 #[global_allocator]
-static GLOBAL: TcMalloc = TcMalloc;
+static GLOBAL: RtMalloc = RtMalloc;
 
 #[test]
 fn test_box() {

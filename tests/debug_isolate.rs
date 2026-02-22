@@ -1,12 +1,12 @@
 //! Isolated debug test: does 65536 + 131072 crash WITHOUT test-framework interference?
 //!
 //! Key: we do NOT set #[global_allocator], so the test framework uses the system
-//! allocator. Only our explicit calls go through TcMalloc.
+//! allocator. Only our explicit calls go through RtMalloc.
 
-use rstcmalloc::TcMalloc;
+use rtmalloc::RtMalloc;
 use std::alloc::{GlobalAlloc, Layout};
 
-static ALLOC: TcMalloc = TcMalloc;
+static ALLOC: RtMalloc = RtMalloc;
 
 /// Just 65536 then 131072, no global_allocator, no warmup
 #[test]

@@ -1,6 +1,6 @@
 //! Top-level allocator: ties all tiers together and implements GlobalAlloc.
 //!
-//! Static state lives here. The `TcMalloc` struct is zero-sized; all mutable
+//! Static state lives here. The `RtMalloc` struct is zero-sized; all mutable
 //! state is in module-level statics protected by spinlocks or atomics.
 //!
 //! Cache strategy (fastest to slowest):
@@ -101,11 +101,11 @@ cfg_if::cfg_if! {
 /// Register as the global allocator with:
 /// ```ignore
 /// #[global_allocator]
-/// static GLOBAL: rstcmalloc::TcMalloc = rstcmalloc::TcMalloc;
+/// static GLOBAL: rtmalloc::RtMalloc = rtmalloc::RtMalloc;
 /// ```
-pub struct TcMalloc;
+pub struct RtMalloc;
 
-unsafe impl GlobalAlloc for TcMalloc {
+unsafe impl GlobalAlloc for RtMalloc {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let size = layout.size();
@@ -206,7 +206,7 @@ unsafe impl GlobalAlloc for TcMalloc {
     }
 }
 
-impl TcMalloc {
+impl RtMalloc {
     // =========================================================================
     // alloc_small / dealloc_small — three tiers via cfg_if
     // =========================================================================

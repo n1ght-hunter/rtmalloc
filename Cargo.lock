@@ -429,7 +429,7 @@ name = "rseq"
 version = "0.1.0"
 
 [[package]]
-name = "rstcmalloc"
+name = "rtmalloc"
 version = "0.1.0"
 dependencies = [
  "cfg-if",
@@ -437,7 +437,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rstcmalloc-bench"
+name = "rtmalloc-bench"
 version = "0.1.0"
 dependencies = [
  "criterion",

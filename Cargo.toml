@@ -2,7 +2,7 @@
 members = [".", "bench", "rseq"]
 
 [package]
-name = "rstcmalloc"
+name = "rtmalloc"
 version = "0.1.0"
 edition = "2024"
 

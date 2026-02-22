@@ -32,8 +32,8 @@ try:
 except ImportError:
     HAS_MATPLOTLIB = False
 
-# Only track rstcmalloc variants in the dashboard (not system/mimalloc).
-TRACKED_ALLOCATORS = {"rstc_nightly", "rstc_std", "rstc_nostd", "rstc_percpu"}
+# Only track rtmalloc variants in the dashboard (not system/mimalloc).
+TRACKED_ALLOCATORS = {"rt_nightly", "rt_std", "rt_nostd", "rt_percpu"}
 
 # Threshold for flagging regressions/improvements in PR comments.
 CHANGE_THRESHOLD = 0.05  # 5%
@@ -41,10 +41,10 @@ CHANGE_THRESHOLD = 0.05  # 5%
 # Canonical allocator ordering (matches KNOWN in alloc_bench.rs).
 ALLOCATOR_ORDER = [
     "system",
-    "rstc_nightly",
-    "rstc_percpu",
-    "rstc_std",
-    "rstc_nostd",
+    "rt_nightly",
+    "rt_percpu",
+    "rt_std",
+    "rt_nostd",
     "mimalloc",
     "google_tc",
     "jemalloc",
@@ -55,10 +55,10 @@ ALLOCATOR_ORDER = [
 # Hex colors matching svg_color_for() in alloc_bench.rs.
 ALLOCATOR_COLORS = {
     "system":       "#888888",
-    "rstc_nightly": "#2ca02c",
-    "rstc_percpu":  "#98df8a",
-    "rstc_std":     "#9467bd",
-    "rstc_nostd":   "#d62728",
+    "rt_nightly": "#2ca02c",
+    "rt_percpu":  "#98df8a",
+    "rt_std":     "#9467bd",
+    "rt_nostd":   "#d62728",
     "mimalloc":     "#17becf",
     "google_tc":    "#ff7f0e",
     "jemalloc":     "#1f77b4",
@@ -69,10 +69,10 @@ ALLOCATOR_COLORS = {
 # Display names for chart labels.
 ALLOCATOR_LABELS = {
     "system":       "system",
-    "rstc_nightly": "rstc (nightly)",
-    "rstc_percpu":  "rstc (percpu)",
-    "rstc_std":     "rstc (std)",
-    "rstc_nostd":   "rstc (nostd)",
+    "rt_nightly": "rt (nightly)",
+    "rt_percpu":  "rt (percpu)",
+    "rt_std":     "rt (std)",
+    "rt_nostd":   "rt (nostd)",
     "mimalloc":     "mimalloc",
     "google_tc":    "tcmalloc",
     "jemalloc":     "jemalloc",
@@ -107,8 +107,8 @@ def scan_criterion_dir(criterion_path):
             continue
 
         # Build the benchmark name from the path relative to criterion_path.
-        # e.g. criterion_path/single_alloc_dealloc/rstc_nightly/8/new/estimates.json
-        #   -> single_alloc_dealloc/rstc_nightly/8
+        # e.g. criterion_path/single_alloc_dealloc/rt_nightly/8/new/estimates.json
+        #   -> single_alloc_dealloc/rt_nightly/8
         rel = os.path.relpath(root, criterion_path)
         # Remove trailing "/new"
         parts = rel.replace("\\", "/").split("/")
@@ -143,7 +143,7 @@ def extract_param(name):
 
 
 def is_tracked(name):
-    """Check if a benchmark name is for a tracked rstcmalloc variant."""
+    """Check if a benchmark name is for a tracked rtmalloc variant."""
     return extract_allocator(name) in TRACKED_ALLOCATORS
 
 
@@ -162,7 +162,7 @@ def format_ns(ns):
 def to_benchmark_json(results):
     """Convert results to github-action-benchmark's customSmallerIsBetter format.
 
-    Only includes tracked rstcmalloc allocator variants.
+    Only includes tracked rtmalloc allocator variants.
     """
     entries = []
     for name in sorted(results.keys()):
@@ -215,25 +215,25 @@ def generate_comparison_comment(base_results, head_results):
     # Build the Markdown
     lines = ["## Benchmark Comparison\n"]
 
-    # Separate rstcmalloc-only stats
-    rstc_improved = [e for e in improved if is_tracked(e[0])]
-    rstc_regressed = [e for e in regressed if is_tracked(e[0])]
-    rstc_unchanged = [e for e in unchanged if is_tracked(e[0])]
+    # Separate rtmalloc-only stats
+    rt_improved = [e for e in improved if is_tracked(e[0])]
+    rt_regressed = [e for e in regressed if is_tracked(e[0])]
+    rt_unchanged = [e for e in unchanged if is_tracked(e[0])]
 
     lines.append(
-        f"**rstcmalloc variants:** "
-        f"{'✅ ' + str(len(rstc_improved)) + ' improved, ' if rstc_improved else ''}"
-        f"{'⚠️ ' + str(len(rstc_regressed)) + ' regressed, ' if rstc_regressed else ''}"
-        f"{len(rstc_unchanged)} unchanged "
+        f"**rtmalloc variants:** "
+        f"{'✅ ' + str(len(rt_improved)) + ' improved, ' if rt_improved else ''}"
+        f"{'⚠️ ' + str(len(rt_regressed)) + ' regressed, ' if rt_regressed else ''}"
+        f"{len(rt_unchanged)} unchanged "
         f"(>{int(CHANGE_THRESHOLD * 100)}% threshold)\n"
     )
 
-    if rstc_regressed:
-        lines.append("> ⚠️ **Performance regressions detected in rstcmalloc.** Please review below.\n")
-    elif rstc_improved:
+    if rt_regressed:
+        lines.append("> ⚠️ **Performance regressions detected in rtmalloc.** Please review below.\n")
+    elif rt_improved:
         lines.append("> ✅ **Performance improvements detected!**\n")
     else:
-        lines.append("> No significant changes in rstcmalloc variants.\n")
+        lines.append("> No significant changes in rtmalloc variants.\n")
 
     # Group benchmarks by group name (first path component)
     groups = {}
@@ -410,7 +410,7 @@ def _generate_parameterized_chart(group_name, params, allocators, param_data, ou
     fig.tight_layout()
     svg_path = os.path.join(output_dir, f"{group_name}.svg")
     fig.savefig(svg_path, format="svg", bbox_inches="tight",
-                metadata={"Creator": "rstcmalloc-bench"})
+                metadata={"Creator": "rtmalloc-bench"})
     plt.close(fig)
     return svg_path
 
@@ -449,7 +449,7 @@ def _generate_simple_chart(group_name, allocators, alloc_data, output_dir):
     fig.tight_layout()
     svg_path = os.path.join(output_dir, f"{group_name}.svg")
     fig.savefig(svg_path, format="svg", bbox_inches="tight",
-                metadata={"Creator": "rstcmalloc-bench"})
+                metadata={"Creator": "rtmalloc-bench"})
     plt.close(fig)
     return svg_path
 
@@ -460,7 +460,7 @@ def _generate_index_html(svg_files, output_dir):
         "<!DOCTYPE html>",
         "<html><head>",
         '<meta charset="utf-8">',
-        "<title>rstcmalloc Benchmark Charts</title>",
+        "<title>rtmalloc Benchmark Charts</title>",
         "<style>",
         "  body { font-family: system-ui, sans-serif; max-width: 1200px;"
         " margin: 0 auto; padding: 20px; background: #fafafa; }",
@@ -471,7 +471,7 @@ def _generate_index_html(svg_files, output_dir):
         "  .timestamp { color: #999; font-size: 0.85em; }",
         "</style>",
         "</head><body>",
-        "<h1>rstcmalloc Benchmark Charts</h1>",
+        "<h1>rtmalloc Benchmark Charts</h1>",
         '<p class="timestamp">Generated from latest main branch push</p>',
     ]
     for svg in sorted(svg_files):

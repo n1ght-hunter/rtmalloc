@@ -3,7 +3,7 @@ use std::process::Command;
 
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(has_google_tcmalloc)");
-    println!("cargo::rustc-check-cfg=cfg(has_rstcmalloc_percpu)");
+    println!("cargo::rustc-check-cfg=cfg(has_rtmalloc_percpu)");
     println!("cargo::rustc-check-cfg=cfg(has_jemalloc)");
 
     // jemalloc is available on non-MSVC targets (Cargo.toml uses target cfg)
@@ -19,7 +19,7 @@ fn main() {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
 
     // =========================================================================
-    // Build rstcmalloc staticlibs with the `fast` profile:
+    // Build rtmalloc staticlibs with the `fast` profile:
     //   - nightly (#[thread_local] thread cache): --features nightly,ffi,testing
     //   - std     (std::thread_local! cache):     --features std,ffi,testing
     //   - nostd   (central cache only):           --features ffi,testing
@@ -31,27 +31,27 @@ fn main() {
         &ws_root,
         &out_dir,
         "nightly,ffi,testing",
-        "rstcmalloc_nightly",
+        "rtmalloc_nightly",
     );
     build_variant(
         &cargo,
         &ws_root,
         &out_dir,
         "std,ffi,testing",
-        "rstcmalloc_std",
+        "rtmalloc_std",
     );
     build_variant(
         &cargo,
         &ws_root,
         &out_dir,
         "ffi,testing",
-        "rstcmalloc_nostd",
+        "rtmalloc_nostd",
     );
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
-    println!("cargo:rustc-link-lib=static=rstcmalloc_nightly");
-    println!("cargo:rustc-link-lib=static=rstcmalloc_std");
-    println!("cargo:rustc-link-lib=static=rstcmalloc_nostd");
+    println!("cargo:rustc-link-lib=static=rtmalloc_nightly");
+    println!("cargo:rustc-link-lib=static=rtmalloc_std");
+    println!("cargo:rustc-link-lib=static=rtmalloc_nostd");
 
     // Per-CPU variant — only on Linux x86_64 (requires rseq)
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -61,10 +61,10 @@ fn main() {
             &ws_root,
             &out_dir,
             "percpu,ffi,testing",
-            "rstcmalloc_percpu",
+            "rtmalloc_percpu",
         );
-        println!("cargo:rustc-link-lib=static=rstcmalloc_percpu");
-        println!("cargo:rustc-cfg=has_rstcmalloc_percpu");
+        println!("cargo:rustc-link-lib=static=rtmalloc_percpu");
+        println!("cargo:rustc-cfg=has_rtmalloc_percpu");
     }
 
     // The `std` variant's staticlib bundles a copy of libstd, which conflicts
@@ -79,7 +79,7 @@ fn main() {
     #[cfg(windows)]
     println!("cargo:rustc-link-lib=dylib=kernel32");
 
-    // Rerun if rstcmalloc source changes
+    // Rerun if rtmalloc source changes
     println!("cargo:rerun-if-changed=../src");
     println!("cargo:rerun-if-changed=../Cargo.toml");
 
@@ -245,7 +245,7 @@ fn lib_exists(dir: &Path, name: &str) -> bool {
 }
 
 // =========================================================================
-// rstcmalloc variant builder
+// rtmalloc variant builder
 // =========================================================================
 
 fn build_variant(cargo: &str, ws_root: &Path, out_dir: &Path, features: &str, lib_name: &str) {
@@ -256,7 +256,7 @@ fn build_variant(cargo: &str, ws_root: &Path, out_dir: &Path, features: &str, li
         .arg("--manifest-path")
         .arg(ws_root.join("Cargo.toml"))
         .arg("-p")
-        .arg("rstcmalloc")
+        .arg("rtmalloc")
         .arg("--profile")
         .arg("fast")
         .arg("--features")
@@ -271,10 +271,10 @@ fn build_variant(cargo: &str, ws_root: &Path, out_dir: &Path, features: &str, li
     assert!(status.success(), "{lib_name} build failed");
 
     // Copy the staticlib to OUT_DIR with the variant name.
-    // MSVC produces `rstcmalloc.lib`, GNU produces `librstcmalloc.a`.
+    // MSVC produces `rtmalloc.lib`, GNU produces `librtmalloc.a`.
     let fast_dir = target_dir.join("fast");
-    let msvc_src = fast_dir.join("rstcmalloc.lib");
-    let gnu_src = fast_dir.join("librstcmalloc.a");
+    let msvc_src = fast_dir.join("rtmalloc.lib");
+    let gnu_src = fast_dir.join("librtmalloc.a");
 
     if msvc_src.exists() {
         std::fs::copy(&msvc_src, out_dir.join(format!("{lib_name}.lib")))

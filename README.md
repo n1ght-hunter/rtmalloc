@@ -1,7 +1,7 @@
-# rstcmalloc
+# rtmalloc: Rust Thread-caching malloc
 
 ## About
-rstcmalloc is a ground up new malloc written in rust based heavily on tcmalloc. 
+rtmalloc is a ground up new malloc written in rust based heavily on tcmalloc. 
 The main reasons for this are:
 - Having a malloc native to rust requireing no c build tools to compile
 - Learning experience of writing a malloc
@@ -17,13 +17,13 @@ The main reasons for this are:
 - [x] Implement a basic malloc with a single global arena
 - [x] Implement a per thread arena design for small allocations
 - [ ] Implement a per cpu arena design for small allocations using rseq experimental
-- [ ] Benchmark and make sure rstcmalloc nightly is within 1% the speed of tcmalloc 
+- [ ] Benchmark and make sure rtmalloc nightly is within 1% the speed of tcmalloc 
 - [ ] Impl profiling with an output to have custom class sizes for better cache performance
 
 ## Benchmarks
 
-Benchmarks are still in progress, but the goal is to have rstcmalloc be within 1% the speed of tcmalloc on a variety of workloads.
-you can run the benchmarks with `cargo bench -p rstcmalloc_bench` 
+Benchmarks are still in progress, but the goal is to have rtmalloc be within 1% the speed of tcmalloc on a variety of workloads.
+you can run the benchmarks with `cargo bench -p rtmalloc_bench` 
 if you wish for tcmalloc to be included in the benchmarks you can build it with `cargo +nightly -Zscript scripts/build_tcmalloc.rs`
 
 # Contributing

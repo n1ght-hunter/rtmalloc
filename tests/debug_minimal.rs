@@ -1,10 +1,10 @@
 //! Ultra-minimal tests: which size first crashes?
 //! No #[global_allocator], no println!, no write_bytes.
 
-use rstcmalloc::TcMalloc;
+use rtmalloc::RtMalloc;
 use std::alloc::{GlobalAlloc, Layout};
 
-static ALLOC: TcMalloc = TcMalloc;
+static ALLOC: RtMalloc = RtMalloc;
 
 #[test]
 fn alloc_8() {

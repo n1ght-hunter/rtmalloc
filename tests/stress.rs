@@ -5,11 +5,11 @@
 //! Any corruption (use-after-free, double-free, buffer overflow) will
 //! cause a pattern mismatch and assertion failure.
 
-use rstcmalloc::TcMalloc;
+use rtmalloc::RtMalloc;
 use std::alloc::{GlobalAlloc, Layout};
 
 #[global_allocator]
-static GLOBAL: TcMalloc = TcMalloc;
+static GLOBAL: RtMalloc = RtMalloc;
 
 /// Fill a buffer with a deterministic pattern derived from its address and size.
 fn fill_pattern(ptr: *mut u8, size: usize) {

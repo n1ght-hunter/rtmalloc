@@ -1,10 +1,10 @@
 //! Debug test to pinpoint SIGSEGV in the allocator.
 
-use rstcmalloc::TcMalloc;
+use rtmalloc::RtMalloc;
 use std::alloc::{GlobalAlloc, Layout};
 
 #[global_allocator]
-static GLOBAL: TcMalloc = TcMalloc;
+static GLOBAL: RtMalloc = RtMalloc;
 
 /// Warmup with sizes, then try alloc 131072
 fn do_test(warmup: &[usize]) {

@@ -41,13 +41,13 @@ jobs:
 
       # ---- base branch ----
       - run: git checkout ${{ github.event.pull_request.base.sha }}
-      - run: cargo bench -p rstcmalloc-bench --bench alloc_bench -- --noplot
+      - run: cargo bench -p rtmalloc-bench --bench alloc_bench -- --noplot
       - run: cp -r target/criterion target/criterion-base
 
       # ---- PR branch ----
       - run: git checkout ${{ github.event.pull_request.head.sha }}
       - run: rm -rf target/criterion
-      - run: cargo bench -p rstcmalloc-bench --bench alloc_bench -- --noplot
+      - run: cargo bench -p rtmalloc-bench --bench alloc_bench -- --noplot
 
       # ---- compare & comment ----
       - run: |

@@ -1,9 +1,9 @@
 //! Diagnostic: print mmap addresses and page IDs to check alignment.
 
-use rstcmalloc::TcMalloc;
+use rtmalloc::RtMalloc;
 use std::alloc::{GlobalAlloc, Layout};
 
-static ALLOC: TcMalloc = TcMalloc;
+static ALLOC: RtMalloc = RtMalloc;
 
 /// Alloc several sizes and print the returned pointers
 #[test]

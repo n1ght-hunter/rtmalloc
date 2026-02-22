@@ -1,12 +1,12 @@
-use rstcmalloc::TcMalloc;
+use rtmalloc::RtMalloc;
 use std::collections::HashMap;
 use std::time::Instant;
 
 #[global_allocator]
-static GLOBAL: TcMalloc = TcMalloc;
+static GLOBAL: RtMalloc = RtMalloc;
 
 fn main() {
-    println!("rstcmalloc demo");
+    println!("rtmalloc demo");
     println!("===============\n");
 
     // Basic allocations

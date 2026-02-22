@@ -34,7 +34,7 @@ jobs:
 
       - run: pip install matplotlib
 
-      - run: cargo bench -p rstcmalloc-bench --bench alloc_bench -- --noplot
+      - run: cargo bench -p rtmalloc-bench --bench alloc_bench -- --noplot
 
       - run: |
           python3 .github/scripts/extract-criterion.py \
@@ -44,7 +44,7 @@ jobs:
 
       - uses: benchmark-action/github-action-benchmark@v1
         with:
-          name: rstcmalloc Benchmarks
+          name: rtmalloc Benchmarks
           tool: 'customSmallerIsBetter'
           output-file-path: bench-results.json
           github-token: ${{ secrets.GITHUB_TOKEN }}

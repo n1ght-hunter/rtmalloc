@@ -1,9 +1,9 @@
-//! Allocator benchmarks comparing rstcmalloc vs system allocator vs mimalloc vs google tcmalloc.
+//! Allocator benchmarks comparing rtmalloc vs system allocator vs mimalloc vs google tcmalloc.
 //!
 //! Since #[global_allocator] is process-wide and cannot be switched at runtime,
 //! each allocator is tested via its raw GlobalAlloc interface directly.
 //!
-//! rstcmalloc is linked as a staticlib (built with --profile fast by build.rs).
+//! rtmalloc is linked as a staticlib (built with --profile fast by build.rs).
 //! After criterion finishes, a colored comparison table is printed.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
@@ -17,17 +17,17 @@ use snmalloc_rs::SnMalloc;
 use tikv_jemallocator::Jemalloc;
 
 // ---------------------------------------------------------------------------
-// rstcmalloc FFI (statically linked, built by build.rs with --profile fast)
+// rtmalloc FFI (statically linked, built by build.rs with --profile fast)
 // ---------------------------------------------------------------------------
 
-mod rstcmalloc_ffi {
+mod rtmalloc_ffi {
     use std::alloc::{GlobalAlloc, Layout};
 
     unsafe extern "C" {
         // Nightly variant (#[thread_local] thread cache)
-        fn rstcmalloc_nightly_alloc(size: usize, align: usize) -> *mut u8;
-        fn rstcmalloc_nightly_dealloc(ptr: *mut u8, size: usize, align: usize);
-        fn rstcmalloc_nightly_realloc(
+        fn rtmalloc_nightly_alloc(size: usize, align: usize) -> *mut u8;
+        fn rtmalloc_nightly_dealloc(ptr: *mut u8, size: usize, align: usize);
+        fn rtmalloc_nightly_realloc(
             ptr: *mut u8,
             size: usize,
             align: usize,
@@ -35,9 +35,9 @@ mod rstcmalloc_ffi {
         ) -> *mut u8;
 
         // Std variant (std::thread_local! thread cache)
-        fn rstcmalloc_std_alloc(size: usize, align: usize) -> *mut u8;
-        fn rstcmalloc_std_dealloc(ptr: *mut u8, size: usize, align: usize);
-        fn rstcmalloc_std_realloc(
+        fn rtmalloc_std_alloc(size: usize, align: usize) -> *mut u8;
+        fn rtmalloc_std_dealloc(ptr: *mut u8, size: usize, align: usize);
+        fn rtmalloc_std_realloc(
             ptr: *mut u8,
             size: usize,
             align: usize,
@@ -45,9 +45,9 @@ mod rstcmalloc_ffi {
         ) -> *mut u8;
 
         // Nostd variant (central cache only, no thread cache)
-        fn rstcmalloc_nostd_alloc(size: usize, align: usize) -> *mut u8;
-        fn rstcmalloc_nostd_dealloc(ptr: *mut u8, size: usize, align: usize);
-        fn rstcmalloc_nostd_realloc(
+        fn rtmalloc_nostd_alloc(size: usize, align: usize) -> *mut u8;
+        fn rtmalloc_nostd_dealloc(ptr: *mut u8, size: usize, align: usize);
+        fn rtmalloc_nostd_realloc(
             ptr: *mut u8,
             size: usize,
             align: usize,
@@ -56,11 +56,11 @@ mod rstcmalloc_ffi {
     }
 
     // Per-CPU variant (rseq, Linux x86_64 only)
-    #[cfg(has_rstcmalloc_percpu)]
+    #[cfg(has_rtmalloc_percpu)]
     unsafe extern "C" {
-        fn rstcmalloc_percpu_alloc(size: usize, align: usize) -> *mut u8;
-        fn rstcmalloc_percpu_dealloc(ptr: *mut u8, size: usize, align: usize);
-        fn rstcmalloc_percpu_realloc(
+        fn rtmalloc_percpu_alloc(size: usize, align: usize) -> *mut u8;
+        fn rtmalloc_percpu_dealloc(ptr: *mut u8, size: usize, align: usize);
+        fn rtmalloc_percpu_realloc(
             ptr: *mut u8,
             size: usize,
             align: usize,
@@ -90,35 +90,35 @@ mod rstcmalloc_ffi {
     }
 
     impl_ffi_alloc!(
-        RstcmallocNightly,
-        rstcmalloc_nightly_alloc,
-        rstcmalloc_nightly_dealloc,
-        rstcmalloc_nightly_realloc
+        RtmallocNightly,
+        rtmalloc_nightly_alloc,
+        rtmalloc_nightly_dealloc,
+        rtmalloc_nightly_realloc
     );
     impl_ffi_alloc!(
-        RstcmallocStd,
-        rstcmalloc_std_alloc,
-        rstcmalloc_std_dealloc,
-        rstcmalloc_std_realloc
+        RtmallocStd,
+        rtmalloc_std_alloc,
+        rtmalloc_std_dealloc,
+        rtmalloc_std_realloc
     );
     impl_ffi_alloc!(
-        RstcmallocNostd,
-        rstcmalloc_nostd_alloc,
-        rstcmalloc_nostd_dealloc,
-        rstcmalloc_nostd_realloc
+        RtmallocNostd,
+        rtmalloc_nostd_alloc,
+        rtmalloc_nostd_dealloc,
+        rtmalloc_nostd_realloc
     );
-    #[cfg(has_rstcmalloc_percpu)]
+    #[cfg(has_rtmalloc_percpu)]
     impl_ffi_alloc!(
-        RstcmallocPercpu,
-        rstcmalloc_percpu_alloc,
-        rstcmalloc_percpu_dealloc,
-        rstcmalloc_percpu_realloc
+        RtmallocPercpu,
+        rtmalloc_percpu_alloc,
+        rtmalloc_percpu_dealloc,
+        rtmalloc_percpu_realloc
     );
 }
 
-#[cfg(has_rstcmalloc_percpu)]
-use rstcmalloc_ffi::RstcmallocPercpu;
-use rstcmalloc_ffi::{RstcmallocNightly, RstcmallocNostd, RstcmallocStd};
+#[cfg(has_rtmalloc_percpu)]
+use rtmalloc_ffi::RtmallocPercpu;
+use rtmalloc_ffi::{RtmallocNightly, RtmallocNostd, RtmallocStd};
 
 // ---------------------------------------------------------------------------
 // Google tcmalloc FFI (statically linked when available)
@@ -166,11 +166,11 @@ mod google_tc {
 #[cfg(has_google_tcmalloc)]
 use google_tc::GoogleTcMalloc;
 
-static TCMALLOC_NIGHTLY: RstcmallocNightly = RstcmallocNightly;
-static TCMALLOC_STD: RstcmallocStd = RstcmallocStd;
-static TCMALLOC_NOSTD: RstcmallocNostd = RstcmallocNostd;
-#[cfg(has_rstcmalloc_percpu)]
-static TCMALLOC_PERCPU: RstcmallocPercpu = RstcmallocPercpu;
+static RTMALLOC_NIGHTLY: RtmallocNightly = RtmallocNightly;
+static RTMALLOC_STD: RtmallocStd = RtmallocStd;
+static RTMALLOC_NOSTD: RtmallocNostd = RtmallocNostd;
+#[cfg(has_rtmalloc_percpu)]
+static RTMALLOC_PERCPU: RtmallocPercpu = RtmallocPercpu;
 static MIMALLOC: MiMalloc = MiMalloc;
 static SNMALLOC: SnMalloc = SnMalloc;
 static RPMALLOC: RpMalloc = RpMalloc;
@@ -243,18 +243,18 @@ fn bench_single_alloc_dealloc(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&System, layout) })
         });
-        group.bench_with_input(BenchmarkId::new("rstc_nightly", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&TCMALLOC_NIGHTLY, layout) })
+        group.bench_with_input(BenchmarkId::new("rt_nightly", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&RTMALLOC_NIGHTLY, layout) })
         });
-        #[cfg(has_rstcmalloc_percpu)]
-        group.bench_with_input(BenchmarkId::new("rstc_percpu", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&TCMALLOC_PERCPU, layout) })
+        #[cfg(has_rtmalloc_percpu)]
+        group.bench_with_input(BenchmarkId::new("rt_percpu", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&RTMALLOC_PERCPU, layout) })
         });
-        group.bench_with_input(BenchmarkId::new("rstc_std", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&TCMALLOC_STD, layout) })
+        group.bench_with_input(BenchmarkId::new("rt_std", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&RTMALLOC_STD, layout) })
         });
-        group.bench_with_input(BenchmarkId::new("rstc_nostd", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&TCMALLOC_NOSTD, layout) })
+        group.bench_with_input(BenchmarkId::new("rt_nostd", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_dealloc(&RTMALLOC_NOSTD, layout) })
         });
         group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&MIMALLOC, layout) })
@@ -290,18 +290,18 @@ fn bench_batch_alloc_free(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&System, layout, n) })
         });
-        group.bench_with_input(BenchmarkId::new("rstc_nightly", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC_NIGHTLY, layout, n) })
+        group.bench_with_input(BenchmarkId::new("rt_nightly", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&RTMALLOC_NIGHTLY, layout, n) })
         });
-        #[cfg(has_rstcmalloc_percpu)]
-        group.bench_with_input(BenchmarkId::new("rstc_percpu", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC_PERCPU, layout, n) })
+        #[cfg(has_rtmalloc_percpu)]
+        group.bench_with_input(BenchmarkId::new("rt_percpu", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&RTMALLOC_PERCPU, layout, n) })
         });
-        group.bench_with_input(BenchmarkId::new("rstc_std", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC_STD, layout, n) })
+        group.bench_with_input(BenchmarkId::new("rt_std", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&RTMALLOC_STD, layout, n) })
         });
-        group.bench_with_input(BenchmarkId::new("rstc_nostd", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&TCMALLOC_NOSTD, layout, n) })
+        group.bench_with_input(BenchmarkId::new("rt_nostd", size), &size, |b, _| {
+            b.iter(|| unsafe { alloc_n_then_free(&RTMALLOC_NOSTD, layout, n) })
         });
         group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&MIMALLOC, layout, n) })
@@ -337,18 +337,18 @@ fn bench_churn(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&System, layout, rounds) })
         });
-        group.bench_with_input(BenchmarkId::new("rstc_nightly", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&TCMALLOC_NIGHTLY, layout, rounds) })
+        group.bench_with_input(BenchmarkId::new("rt_nightly", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&RTMALLOC_NIGHTLY, layout, rounds) })
         });
-        #[cfg(has_rstcmalloc_percpu)]
-        group.bench_with_input(BenchmarkId::new("rstc_percpu", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&TCMALLOC_PERCPU, layout, rounds) })
+        #[cfg(has_rtmalloc_percpu)]
+        group.bench_with_input(BenchmarkId::new("rt_percpu", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&RTMALLOC_PERCPU, layout, rounds) })
         });
-        group.bench_with_input(BenchmarkId::new("rstc_std", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&TCMALLOC_STD, layout, rounds) })
+        group.bench_with_input(BenchmarkId::new("rt_std", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&RTMALLOC_STD, layout, rounds) })
         });
-        group.bench_with_input(BenchmarkId::new("rstc_nostd", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&TCMALLOC_NOSTD, layout, rounds) })
+        group.bench_with_input(BenchmarkId::new("rt_nostd", size), &size, |b, _| {
+            b.iter(|| unsafe { churn(&RTMALLOC_NOSTD, layout, rounds) })
         });
         group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&MIMALLOC, layout, rounds) })
@@ -403,18 +403,18 @@ fn bench_vec_push(c: &mut Criterion) {
     group.bench_function("system", |b| {
         b.iter(|| simulate_vec_growth(&System, black_box(final_len)))
     });
-    group.bench_function("rstc_nightly", |b| {
-        b.iter(|| simulate_vec_growth(&TCMALLOC_NIGHTLY, black_box(final_len)))
+    group.bench_function("rt_nightly", |b| {
+        b.iter(|| simulate_vec_growth(&RTMALLOC_NIGHTLY, black_box(final_len)))
     });
-    #[cfg(has_rstcmalloc_percpu)]
-    group.bench_function("rstc_percpu", |b| {
-        b.iter(|| simulate_vec_growth(&TCMALLOC_PERCPU, black_box(final_len)))
+    #[cfg(has_rtmalloc_percpu)]
+    group.bench_function("rt_percpu", |b| {
+        b.iter(|| simulate_vec_growth(&RTMALLOC_PERCPU, black_box(final_len)))
     });
-    group.bench_function("rstc_std", |b| {
-        b.iter(|| simulate_vec_growth(&TCMALLOC_STD, black_box(final_len)))
+    group.bench_function("rt_std", |b| {
+        b.iter(|| simulate_vec_growth(&RTMALLOC_STD, black_box(final_len)))
     });
-    group.bench_function("rstc_nostd", |b| {
-        b.iter(|| simulate_vec_growth(&TCMALLOC_NOSTD, black_box(final_len)))
+    group.bench_function("rt_nostd", |b| {
+        b.iter(|| simulate_vec_growth(&RTMALLOC_NOSTD, black_box(final_len)))
     });
     group.bench_function("mimalloc", |b| {
         b.iter(|| simulate_vec_growth(&MIMALLOC, black_box(final_len)))
@@ -477,18 +477,18 @@ fn bench_multithreaded(c: &mut Criterion) {
     group.bench_function("system", |b| {
         b.iter(|| mt_workload(&SYS, nthreads, ops_per_thread))
     });
-    group.bench_function("rstc_nightly", |b| {
-        b.iter(|| mt_workload(&TCMALLOC_NIGHTLY, nthreads, ops_per_thread))
+    group.bench_function("rt_nightly", |b| {
+        b.iter(|| mt_workload(&RTMALLOC_NIGHTLY, nthreads, ops_per_thread))
     });
-    #[cfg(has_rstcmalloc_percpu)]
-    group.bench_function("rstc_percpu", |b| {
-        b.iter(|| mt_workload(&TCMALLOC_PERCPU, nthreads, ops_per_thread))
+    #[cfg(has_rtmalloc_percpu)]
+    group.bench_function("rt_percpu", |b| {
+        b.iter(|| mt_workload(&RTMALLOC_PERCPU, nthreads, ops_per_thread))
     });
-    group.bench_function("rstc_std", |b| {
-        b.iter(|| mt_workload(&TCMALLOC_STD, nthreads, ops_per_thread))
+    group.bench_function("rt_std", |b| {
+        b.iter(|| mt_workload(&RTMALLOC_STD, nthreads, ops_per_thread))
     });
-    group.bench_function("rstc_nostd", |b| {
-        b.iter(|| mt_workload(&TCMALLOC_NOSTD, nthreads, ops_per_thread))
+    group.bench_function("rt_nostd", |b| {
+        b.iter(|| mt_workload(&RTMALLOC_NOSTD, nthreads, ops_per_thread))
     });
     group.bench_function("mimalloc", |b| {
         b.iter(|| mt_workload(&MIMALLOC, nthreads, ops_per_thread))
@@ -570,18 +570,18 @@ fn bench_cross_thread_free(c: &mut Criterion) {
     group.bench_function("system", |b| {
         b.iter(|| cross_thread_workload(&SYS2, nthreads, ops))
     });
-    group.bench_function("rstc_nightly", |b| {
-        b.iter(|| cross_thread_workload(&TCMALLOC_NIGHTLY, nthreads, ops))
+    group.bench_function("rt_nightly", |b| {
+        b.iter(|| cross_thread_workload(&RTMALLOC_NIGHTLY, nthreads, ops))
     });
-    #[cfg(has_rstcmalloc_percpu)]
-    group.bench_function("rstc_percpu", |b| {
-        b.iter(|| cross_thread_workload(&TCMALLOC_PERCPU, nthreads, ops))
+    #[cfg(has_rtmalloc_percpu)]
+    group.bench_function("rt_percpu", |b| {
+        b.iter(|| cross_thread_workload(&RTMALLOC_PERCPU, nthreads, ops))
     });
-    group.bench_function("rstc_std", |b| {
-        b.iter(|| cross_thread_workload(&TCMALLOC_STD, nthreads, ops))
+    group.bench_function("rt_std", |b| {
+        b.iter(|| cross_thread_workload(&RTMALLOC_STD, nthreads, ops))
     });
-    group.bench_function("rstc_nostd", |b| {
-        b.iter(|| cross_thread_workload(&TCMALLOC_NOSTD, nthreads, ops))
+    group.bench_function("rt_nostd", |b| {
+        b.iter(|| cross_thread_workload(&RTMALLOC_NOSTD, nthreads, ops))
     });
     group.bench_function("mimalloc", |b| {
         b.iter(|| cross_thread_workload(&MIMALLOC, nthreads, ops))
@@ -650,25 +650,25 @@ fn bench_thread_scalability(c: &mut Criterion) {
             b.iter(|| scale_workload(&SYS3, nt, ops_per_thread))
         });
         group.bench_with_input(
-            BenchmarkId::new("rstc_nightly", nthreads),
+            BenchmarkId::new("rt_nightly", nthreads),
             &nthreads,
-            |b, &nt| b.iter(|| scale_workload(&TCMALLOC_NIGHTLY, nt, ops_per_thread)),
+            |b, &nt| b.iter(|| scale_workload(&RTMALLOC_NIGHTLY, nt, ops_per_thread)),
         );
-        #[cfg(has_rstcmalloc_percpu)]
+        #[cfg(has_rtmalloc_percpu)]
         group.bench_with_input(
-            BenchmarkId::new("rstc_percpu", nthreads),
+            BenchmarkId::new("rt_percpu", nthreads),
             &nthreads,
-            |b, &nt| b.iter(|| scale_workload(&TCMALLOC_PERCPU, nt, ops_per_thread)),
-        );
-        group.bench_with_input(
-            BenchmarkId::new("rstc_std", nthreads),
-            &nthreads,
-            |b, &nt| b.iter(|| scale_workload(&TCMALLOC_STD, nt, ops_per_thread)),
+            |b, &nt| b.iter(|| scale_workload(&RTMALLOC_PERCPU, nt, ops_per_thread)),
         );
         group.bench_with_input(
-            BenchmarkId::new("rstc_nostd", nthreads),
+            BenchmarkId::new("rt_std", nthreads),
             &nthreads,
-            |b, &nt| b.iter(|| scale_workload(&TCMALLOC_NOSTD, nt, ops_per_thread)),
+            |b, &nt| b.iter(|| scale_workload(&RTMALLOC_STD, nt, ops_per_thread)),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("rt_nostd", nthreads),
+            &nthreads,
+            |b, &nt| b.iter(|| scale_workload(&RTMALLOC_NOSTD, nt, ops_per_thread)),
         );
         group.bench_with_input(
             BenchmarkId::new("mimalloc", nthreads),
@@ -761,18 +761,18 @@ fn bench_mixed_sizes(c: &mut Criterion) {
     group.bench_function("system", |b| {
         b.iter(|| mixed_workload(&System, black_box(n)))
     });
-    group.bench_function("rstc_nightly", |b| {
-        b.iter(|| mixed_workload(&TCMALLOC_NIGHTLY, black_box(n)))
+    group.bench_function("rt_nightly", |b| {
+        b.iter(|| mixed_workload(&RTMALLOC_NIGHTLY, black_box(n)))
     });
-    #[cfg(has_rstcmalloc_percpu)]
-    group.bench_function("rstc_percpu", |b| {
-        b.iter(|| mixed_workload(&TCMALLOC_PERCPU, black_box(n)))
+    #[cfg(has_rtmalloc_percpu)]
+    group.bench_function("rt_percpu", |b| {
+        b.iter(|| mixed_workload(&RTMALLOC_PERCPU, black_box(n)))
     });
-    group.bench_function("rstc_std", |b| {
-        b.iter(|| mixed_workload(&TCMALLOC_STD, black_box(n)))
+    group.bench_function("rt_std", |b| {
+        b.iter(|| mixed_workload(&RTMALLOC_STD, black_box(n)))
     });
-    group.bench_function("rstc_nostd", |b| {
-        b.iter(|| mixed_workload(&TCMALLOC_NOSTD, black_box(n)))
+    group.bench_function("rt_nostd", |b| {
+        b.iter(|| mixed_workload(&RTMALLOC_NOSTD, black_box(n)))
     });
     group.bench_function("mimalloc", |b| {
         b.iter(|| mixed_workload(&MIMALLOC, black_box(n)))
@@ -851,18 +851,18 @@ fn bench_producer_consumer(c: &mut Criterion) {
     group.bench_function("system", |b| {
         b.iter(|| pc_workload(&SYS4, npairs, ops_per_producer))
     });
-    group.bench_function("rstc_nightly", |b| {
-        b.iter(|| pc_workload(&TCMALLOC_NIGHTLY, npairs, ops_per_producer))
+    group.bench_function("rt_nightly", |b| {
+        b.iter(|| pc_workload(&RTMALLOC_NIGHTLY, npairs, ops_per_producer))
     });
-    #[cfg(has_rstcmalloc_percpu)]
-    group.bench_function("rstc_percpu", |b| {
-        b.iter(|| pc_workload(&TCMALLOC_PERCPU, npairs, ops_per_producer))
+    #[cfg(has_rtmalloc_percpu)]
+    group.bench_function("rt_percpu", |b| {
+        b.iter(|| pc_workload(&RTMALLOC_PERCPU, npairs, ops_per_producer))
     });
-    group.bench_function("rstc_std", |b| {
-        b.iter(|| pc_workload(&TCMALLOC_STD, npairs, ops_per_producer))
+    group.bench_function("rt_std", |b| {
+        b.iter(|| pc_workload(&RTMALLOC_STD, npairs, ops_per_producer))
     });
-    group.bench_function("rstc_nostd", |b| {
-        b.iter(|| pc_workload(&TCMALLOC_NOSTD, npairs, ops_per_producer))
+    group.bench_function("rt_nostd", |b| {
+        b.iter(|| pc_workload(&RTMALLOC_NOSTD, npairs, ops_per_producer))
     });
     group.bench_function("mimalloc", |b| {
         b.iter(|| pc_workload(&MIMALLOC, npairs, ops_per_producer))
@@ -924,10 +924,10 @@ mod summary {
 
     const KNOWN: &[&str] = &[
         "system",
-        "rstc_nightly",
-        "rstc_percpu",
-        "rstc_std",
-        "rstc_nostd",
+        "rt_nightly",
+        "rt_percpu",
+        "rt_std",
+        "rt_nostd",
         "mimalloc",
         "google_tc",
         "jemalloc",
@@ -938,10 +938,10 @@ mod summary {
     fn color_for(name: &str) -> &'static str {
         match name {
             "system" => WHITE,
-            "rstc_nightly" => GREEN,
-            "rstc_percpu" => BRIGHT_GREEN,
-            "rstc_std" => MAGENTA,
-            "rstc_nostd" => RED,
+            "rt_nightly" => GREEN,
+            "rt_percpu" => BRIGHT_GREEN,
+            "rt_std" => MAGENTA,
+            "rt_nostd" => RED,
             "mimalloc" => CYAN,
             "google_tc" => YELLOW,
             "jemalloc" => BRIGHT_BLUE,
@@ -1062,10 +1062,10 @@ mod summary {
         println!();
         print!("  Legend: ");
         print!("{WHITE}system{RESET}  ");
-        print!("{GREEN}rstc_nightly{RESET}  ");
-        print!("{BRIGHT_GREEN}rstc_percpu{RESET}  ");
-        print!("{MAGENTA}rstc_std{RESET}  ");
-        print!("{RED}rstc_nostd{RESET}  ");
+        print!("{GREEN}rt_nightly{RESET}  ");
+        print!("{BRIGHT_GREEN}rt_percpu{RESET}  ");
+        print!("{MAGENTA}rt_std{RESET}  ");
+        print!("{RED}rt_nostd{RESET}  ");
         print!("{CYAN}mimalloc{RESET}  ");
         print!("{YELLOW}google_tc{RESET}  ");
         print!("{BRIGHT_BLUE}jemalloc{RESET}  ");
@@ -1128,10 +1128,10 @@ mod summary {
     fn svg_color_for(name: &str) -> &'static str {
         match name {
             "system" => "#888888",       // gray
-            "rstc_nightly" => "#2ca02c", // green
-            "rstc_percpu" => "#98df8a",  // light green
-            "rstc_std" => "#9467bd",     // purple
-            "rstc_nostd" => "#d62728",   // red
+            "rt_nightly" => "#2ca02c", // green
+            "rt_percpu" => "#98df8a",  // light green
+            "rt_std" => "#9467bd",     // purple
+            "rt_nostd" => "#d62728",   // red
             "mimalloc" => "#17becf",     // cyan
             "google_tc" => "#ff7f0e",    // orange
             "jemalloc" => "#1f77b4",     // blue

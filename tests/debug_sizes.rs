@@ -1,10 +1,10 @@
 //! Test each size class's page count in isolation.
 //! No #[global_allocator].
 
-use rstcmalloc::TcMalloc;
+use rtmalloc::RtMalloc;
 use std::alloc::{GlobalAlloc, Layout};
 
-static ALLOC: TcMalloc = TcMalloc;
+static ALLOC: RtMalloc = RtMalloc;
 
 // Pages=1 tests
 #[test]

@@ -1,10 +1,10 @@
 //! Multi-threaded integration test.
 
-use rstcmalloc::TcMalloc;
+use rtmalloc::RtMalloc;
 use std::sync::Arc;
 
 #[global_allocator]
-static GLOBAL: TcMalloc = TcMalloc;
+static GLOBAL: RtMalloc = RtMalloc;
 
 #[test]
 fn test_multithreaded_alloc() {

@@ -3,11 +3,11 @@
 //! Verifies that allocations respect alignment requirements for various
 //! alignment values, including over-aligned allocations (> 8 bytes).
 
-use rstcmalloc::TcMalloc;
+use rtmalloc::RtMalloc;
 use std::alloc::{GlobalAlloc, Layout};
 
 #[global_allocator]
-static GLOBAL: TcMalloc = TcMalloc;
+static GLOBAL: RtMalloc = RtMalloc;
 
 #[test]
 fn test_standard_alignments() {
