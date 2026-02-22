@@ -660,11 +660,9 @@ fn bench_thread_scalability(c: &mut Criterion) {
             &nthreads,
             |b, &nt| b.iter(|| scale_workload(&RTMALLOC_PERCPU, nt, ops_per_thread)),
         );
-        group.bench_with_input(
-            BenchmarkId::new("rt_std", nthreads),
-            &nthreads,
-            |b, &nt| b.iter(|| scale_workload(&RTMALLOC_STD, nt, ops_per_thread)),
-        );
+        group.bench_with_input(BenchmarkId::new("rt_std", nthreads), &nthreads, |b, &nt| {
+            b.iter(|| scale_workload(&RTMALLOC_STD, nt, ops_per_thread))
+        });
         group.bench_with_input(
             BenchmarkId::new("rt_nostd", nthreads),
             &nthreads,
@@ -1127,17 +1125,17 @@ mod summary {
     /// Hex colors for SVG plots.
     fn svg_color_for(name: &str) -> &'static str {
         match name {
-            "system" => "#888888",       // gray
+            "system" => "#888888",     // gray
             "rt_nightly" => "#2ca02c", // green
             "rt_percpu" => "#98df8a",  // light green
             "rt_std" => "#9467bd",     // purple
             "rt_nostd" => "#d62728",   // red
-            "mimalloc" => "#17becf",     // cyan
-            "google_tc" => "#ff7f0e",    // orange
-            "jemalloc" => "#1f77b4",     // blue
-            "snmalloc" => "#e377c2",     // pink
-            "rpmalloc" => "#bcbd22",     // olive
-            _ => "#1f78b4",              // default blue
+            "mimalloc" => "#17becf",   // cyan
+            "google_tc" => "#ff7f0e",  // orange
+            "jemalloc" => "#1f77b4",   // blue
+            "snmalloc" => "#e377c2",   // pink
+            "rpmalloc" => "#bcbd22",   // olive
+            _ => "#1f78b4",            // default blue
         }
     }
 

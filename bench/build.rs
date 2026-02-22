@@ -40,13 +40,7 @@ fn main() {
         "std,ffi,testing",
         "rtmalloc_std",
     );
-    build_variant(
-        &cargo,
-        &ws_root,
-        &out_dir,
-        "ffi,testing",
-        "rtmalloc_nostd",
-    );
+    build_variant(&cargo, &ws_root, &out_dir, "ffi,testing", "rtmalloc_nostd");
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=static=rtmalloc_nightly");
