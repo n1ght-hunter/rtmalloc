@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rtmalloc - Dev</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 40px 20px;
+      background: #fafafa;
+      color: #333;
+    }
+    h1 { margin-bottom: 0.25em; }
+    .breadcrumb { color: #888; margin-bottom: 2em; }
+    .breadcrumb a { color: #3273dc; text-decoration: none; }
+    .breadcrumb a:hover { text-decoration: underline; }
+    nav a {
+      display: block;
+      padding: 16px 20px;
+      margin: 8px 0;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      color: #3273dc;
+      text-decoration: none;
+      font-size: 1.1em;
+    }
+    nav a:hover { background: #f0f4ff; border-color: #3273dc; }
+    nav a span { display: block; color: #888; font-size: 0.85em; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="breadcrumb"><a href="../">rtmalloc</a> / dev</div>
+  <h1>Dev Dashboard</h1>
+
+  <nav>
+    <a href="bench/">
+      Benchmark Tracking
+      <span>Performance over time, commit-by-commit line charts</span>
+    </a>
+    <a href="charts/">
+      Benchmark Charts
+      <span>Latest bar chart comparisons across all allocators</span>
+    </a>
+  </nav>
+</body>
+</html>

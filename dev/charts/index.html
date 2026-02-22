@@ -1,16 +1,20 @@
 <!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
-<title>rstcmalloc Benchmark Charts</title>
+<title>rtmalloc Benchmark Charts</title>
 <style>
   body { font-family: system-ui, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; background: #fafafa; }
   h1 { color: #333; }
   .chart { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin: 24px 0; }
   .chart img { width: 100%; height: auto; }
   .timestamp { color: #999; font-size: 0.85em; }
+  .breadcrumb { color: #888; margin-bottom: 0.5em; }
+  .breadcrumb a { color: #3273dc; text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
 </style>
 </head><body>
-<h1>rstcmalloc Benchmark Charts</h1>
+<div class="breadcrumb"><a href="../../">rtmalloc</a> / <a href="../">dev</a> / charts</div>
+<h1>rtmalloc Benchmark Charts</h1>
 <p class="timestamp">Generated from latest main branch push</p>
 <div class="chart"><h2>Batch 1000</h2><img src="batch_1000.svg" alt="Batch 1000"></div>
 <div class="chart"><h2>Churn</h2><img src="churn.svg" alt="Churn"></div>
