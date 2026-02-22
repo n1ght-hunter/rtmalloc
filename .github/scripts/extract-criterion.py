@@ -176,6 +176,19 @@ def to_benchmark_json(results):
     return entries
 
 
+def to_bmf_json(results):
+    """Convert results to Bencher Metric Format (BMF) JSON.
+
+    Only includes tracked rtmalloc allocator variants.
+    """
+    bmf = {}
+    for name in sorted(results.keys()):
+        if not is_tracked(name):
+            continue
+        bmf[name] = {"latency": {"value": round(results[name], 2)}}
+    return bmf
+
+
 def generate_comparison_comment(base_results, head_results):
     """Generate a Markdown comparison comment for a PR."""
     # Collect all benchmark names present in either run
@@ -541,7 +554,8 @@ def main():
     parser = argparse.ArgumentParser(description="Extract Criterion benchmark results")
     parser.add_argument("--base", help="Path to base criterion directory (for comparison)")
     parser.add_argument("--head", required=True, help="Path to head criterion directory")
-    parser.add_argument("--output-json", help="Output path for dashboard JSON")
+    parser.add_argument("--output-json", help="Output path for dashboard JSON (github-action-benchmark format)")
+    parser.add_argument("--output-bmf", help="Output path for Bencher Metric Format JSON (bencher.dev)")
     parser.add_argument("--output-comment", help="Output path for PR comparison Markdown")
     parser.add_argument("--output-charts", help="Output directory for comparison chart SVGs")
     args = parser.parse_args()
@@ -555,6 +569,12 @@ def main():
         with open(args.output_json, "w") as f:
             json.dump(entries, f, indent=2)
         print(f"Wrote {len(entries)} entries to {args.output_json}")
+
+    if args.output_bmf:
+        bmf = to_bmf_json(head_results)
+        with open(args.output_bmf, "w") as f:
+            json.dump(bmf, f, indent=2)
+        print(f"Wrote {len(bmf)} BMF entries to {args.output_bmf}")
 
     if args.output_charts:
         chart_files = generate_charts(head_results, args.output_charts)
