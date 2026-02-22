@@ -9,6 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  contents: read
   pull-requests: write
 
 jobs:
@@ -22,15 +23,23 @@ jobs:
       pr-number: ${{ steps.pr.outputs.number }}
       head-sha: ${{ steps.pr.outputs.head_sha }}
       base-sha: ${{ steps.pr.outputs.base_sha }}
+      head-ref: ${{ steps.pr.outputs.head_ref }}
+      base-ref: ${{ steps.pr.outputs.base_ref }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "number=${{ github.event.workflow_run.pull_requests[0].number }}" >> "$GITHUB_OUTPUT"
+          PR_NUMBER="${{ github.event.workflow_run.pull_requests[0].number }}"
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           echo "head_sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
           echo "base_sha=${{ github.event.workflow_run.pull_requests[0].base.sha }}" >> "$GITHUB_OUTPUT"
+          PR_JSON=$(gh pr view "$PR_NUMBER" --json headRefName,baseRefName)
+          echo "head_ref=$(echo "$PR_JSON" | jq -r .headRefName)" >> "$GITHUB_OUTPUT"
+          echo "base_ref=$(echo "$PR_JSON" | jq -r .baseRefName)" >> "$GITHUB_OUTPUT"
       - id: filter
         run: |
           BASE="${{ steps.pr.outputs.base_sha }}"
@@ -42,14 +51,59 @@ jobs:
             echo "relevant=false" >> "$GITHUB_OUTPUT"
           fi
 
-  benchmark:
+  # ---- Criterion microbenchmarks ----
+  criterion:
     needs: check-paths
     if: needs.check-paths.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: ${{ needs.check-paths.outputs.head-sha }}
+
+      - run: rustup show
+
+      - name: Install cmake
+        run: sudo apt-get update && sudo apt-get install -y cmake
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: bench-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: bench-${{ runner.os }}-
+
+      - uses: bencherdev/bencher@main
+
+      - name: Track PR Criterion benchmarks
+        run: |
+          bencher run \
+            --project rtmalloc \
+            --token '${{ secrets.BENCHER_API_TOKEN }}' \
+            --branch '${{ needs.check-paths.outputs.head-ref }}' \
+            --hash '${{ needs.check-paths.outputs.head-sha }}' \
+            --start-point '${{ needs.check-paths.outputs.base-ref }}' \
+            --start-point-hash '${{ needs.check-paths.outputs.base-sha }}' \
+            --start-point-clone-thresholds \
+            --start-point-reset \
+            --testbed github-actions \
+            --adapter rust_criterion \
+            --err \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            --ci-number '${{ needs.check-paths.outputs.pr-number }}' \
+            "cargo bench -p rtmalloc-bench --bench alloc_bench -- --noplot"
+
+  # ---- mimalloc-bench real-world programs ----
+  mimalloc-bench:
+    needs: check-paths
+    if: needs.check-paths.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-paths.outputs.head-sha }}
 
       - run: rustup show
 
@@ -62,7 +116,6 @@ jobs:
           key: bench-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: bench-${{ runner.os }}-
 
-      # Cache mimalloc-bench build
       - uses: actions/cache@v4
         id: mimalloc-bench-cache
         with:
@@ -76,57 +129,51 @@ jobs:
           cd mimalloc-bench
           ./build-bench-env.sh all
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      # ---- Build rtmalloc .so from base (main) ----
-      - name: Build base allocators
+      - name: Build rtmalloc shared libraries
         run: |
-          git checkout ${{ needs.check-paths.outputs.base-sha }}
           cargo rustc -p rtmalloc --features c-abi,nightly --crate-type cdylib --profile fast
-          cp target/fast/librtmalloc.so librtmalloc_nightly_base.so
+          cp target/fast/librtmalloc.so librtmalloc_nightly.so
           cargo rustc -p rtmalloc --features c-abi,std --crate-type cdylib --profile fast
-          cp target/fast/librtmalloc.so librtmalloc_std_base.so
+          cp target/fast/librtmalloc.so librtmalloc_std.so
 
-      # ---- Build rtmalloc .so from head (PR) ----
-      - name: Build head allocators
-        run: |
-          git checkout ${{ needs.check-paths.outputs.head-sha }}
-          cargo rustc -p rtmalloc --features c-abi,nightly --crate-type cdylib --profile fast
-          cp target/fast/librtmalloc.so librtmalloc_nightly_head.so
-          cargo rustc -p rtmalloc --features c-abi,std --crate-type cdylib --profile fast
-          cp target/fast/librtmalloc.so librtmalloc_std_head.so
-
-      # ---- Run mimalloc-bench ----
-      - name: Run benchmarks
+      - name: Run mimalloc-bench
         run: |
           cd mimalloc-bench/out/bench
 
-          # Create external allocators file with absolute paths
           REPO_ROOT="${{ github.workspace }}"
           cat > "$REPO_ROOT/ext.txt" <<EOF
-          rt_nightly_base $REPO_ROOT/librtmalloc_nightly_base.so
-          rt_nightly $REPO_ROOT/librtmalloc_nightly_head.so
-          rt_std_base $REPO_ROOT/librtmalloc_std_base.so
-          rt_std $REPO_ROOT/librtmalloc_std_head.so
+          rt_nightly $REPO_ROOT/librtmalloc_nightly.so
+          rt_std $REPO_ROOT/librtmalloc_std.so
           EOF
 
           ../../bench.sh --external="$REPO_ROOT/ext.txt" mi allt
 
           cp benchres.csv "$REPO_ROOT/benchres.csv"
 
-      # ---- Parse and comment ----
-      - name: Generate comparison
-        run: |
-          git checkout ${{ needs.check-paths.outputs.head-sha }}
-          python3 .github/scripts/parse-mimalloc-bench.py \
-            --csv benchres.csv \
-            --base-prefix _base \
-            --output-comment bench-comment.md
+      - uses: astral-sh/setup-uv@v5
 
-      - uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: mimalloc-bench-comparison
-          path: bench-comment.md
-          number: ${{ needs.check-paths.outputs.pr-number }}
+      - name: Parse results
+        run: |
+          uv run .github/scripts/parse-mimalloc-bench.py \
+            --csv benchres.csv \
+            --output-bmf bench-results-bmf.json
+
+      - uses: bencherdev/bencher@main
+
+      - name: Track PR mimalloc-bench results
+        run: |
+          bencher run \
+            --project rtmalloc \
+            --token '${{ secrets.BENCHER_API_TOKEN }}' \
+            --branch '${{ needs.check-paths.outputs.head-ref }}' \
+            --hash '${{ needs.check-paths.outputs.head-sha }}' \
+            --start-point '${{ needs.check-paths.outputs.base-ref }}' \
+            --start-point-hash '${{ needs.check-paths.outputs.base-sha }}' \
+            --start-point-clone-thresholds \
+            --start-point-reset \
+            --testbed github-actions \
+            --adapter json \
+            --file bench-results-bmf.json \
+            --err \
+            --github-actions '${{ secrets.GITHUB_TOKEN }}' \
+            --ci-number '${{ needs.check-paths.outputs.pr-number }}'
