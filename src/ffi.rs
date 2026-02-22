@@ -117,12 +117,8 @@ pub unsafe extern "C" fn rtmalloc_realloc(
     unsafe { ALLOC.realloc(ptr, layout, new_size) }
 }
 
-// =============================================================================
-// Standard C malloc/free/realloc/calloc API for LD_PRELOAD (cdylib builds).
-// Gated behind `features = ["c-abi"]`.
-// =============================================================================
-
 #[cfg(feature = "c-abi")]
+#[allow(clippy::missing_safety_doc)]
 pub mod c_abi {
     use super::ALLOC;
     use crate::allocator::PAGE_MAP;
