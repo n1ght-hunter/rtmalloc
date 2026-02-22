@@ -27,7 +27,6 @@ impl SpinLock {
 
     #[inline]
     pub fn lock(&self) {
-        // Fast path: try to acquire immediately
         if self
             .locked
             .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -35,7 +34,6 @@ impl SpinLock {
         {
             return;
         }
-        // Slow path: spin with backoff
         self.lock_slow();
     }
 
@@ -46,7 +44,6 @@ impl SpinLock {
             while self.locked.load(Ordering::Relaxed) {
                 core::hint::spin_loop();
             }
-            // Try to acquire
             if self
                 .locked
                 .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -70,7 +67,6 @@ impl SpinLock {
     }
 }
 
-// SpinLock is safe to share between threads
 unsafe impl Send for SpinLock {}
 unsafe impl Sync for SpinLock {}
 

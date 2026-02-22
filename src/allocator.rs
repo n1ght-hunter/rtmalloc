@@ -37,10 +37,6 @@ cfg_if::cfg_if! {
     }
 }
 
-// =============================================================================
-// Global static state
-// =============================================================================
-
 pub(crate) static PAGE_MAP: PageMap = PageMap::new();
 pub(crate) static PAGE_HEAP: SpinMutex<PageHeap> = SpinMutex::new(PageHeap::new(&PAGE_MAP));
 pub(crate) static CENTRAL_CACHE: CentralCache = CentralCache::new();
@@ -50,10 +46,6 @@ cfg_if::cfg_if! {
         pub(crate) static TRANSFER_CACHE: TransferCacheArray = TransferCacheArray::new();
     }
 }
-
-// =============================================================================
-// Thread-local cache
-// =============================================================================
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "percpu")] {
@@ -146,10 +138,6 @@ cfg_if::cfg_if! {
         }
     }
 }
-
-// =============================================================================
-// The allocator
-// =============================================================================
 
 /// tcmalloc-style allocator for Rust.
 ///
@@ -268,10 +256,6 @@ unsafe impl GlobalAlloc for RtMalloc {
 }
 
 impl RtMalloc {
-    // =========================================================================
-    // alloc_small / dealloc_small — three tiers via cfg_if
-    // =========================================================================
-
     cfg_if::cfg_if! {
         if #[cfg(feature = "percpu")] {
             #[inline(always)]
@@ -359,10 +343,6 @@ impl RtMalloc {
         }
     }
 
-    // =========================================================================
-    // Central cache fallback (std and no-std-no-nightly paths)
-    // =========================================================================
-
     cfg_if::cfg_if! {
         if #[cfg(not(feature = "percpu"))] {
             unsafe fn alloc_from_central(&self, size_class: usize) -> *mut u8 {
@@ -391,10 +371,6 @@ impl RtMalloc {
             }
         }
     }
-
-    // =========================================================================
-    // Slow paths (shared by all tiers)
-    // =========================================================================
 
     unsafe fn alloc_large(&self, layout: Layout) -> *mut u8 {
         let size = layout.size();
