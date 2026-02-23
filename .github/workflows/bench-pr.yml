@@ -107,6 +107,9 @@ jobs:
 
       - run: rustup show
 
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake autoconf libtool ninja-build
+
       - uses: actions/cache@v4
         with:
           path: |
@@ -120,14 +123,14 @@ jobs:
         id: mimalloc-bench-cache
         with:
           path: mimalloc-bench
-          key: mimalloc-bench-${{ runner.os }}-v1
+          key: mimalloc-bench-${{ runner.os }}-v2
 
       - name: Clone and build mimalloc-bench
         if: steps.mimalloc-bench-cache.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/daanx/mimalloc-bench.git
           cd mimalloc-bench
-          ./build-bench-env.sh all
+          ./build-bench-env.sh mi tc je sn
 
       - name: Build rtmalloc shared libraries
         run: |
@@ -146,7 +149,7 @@ jobs:
           rt_std $REPO_ROOT/librtmalloc_std.so
           EOF
 
-          ../../bench.sh --external="$REPO_ROOT/ext.txt" mi allt
+          ../../bench.sh --external="$REPO_ROOT/ext.txt" mi tc je sn allt
 
           cp benchres.csv "$REPO_ROOT/benchres.csv"
 
