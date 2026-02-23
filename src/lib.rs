@@ -1,5 +1,5 @@
 #![no_std]
-#![cfg_attr(feature = "nightly", feature(thread_local))]
+#![cfg_attr(feature = "nightly", feature(thread_local, allocator_api))]
 
 //! rtmalloc: A tcmalloc-style memory allocator for Rust.
 //!
@@ -34,6 +34,9 @@ pub mod span;
 pub mod sync;
 #[cfg(feature = "stats")]
 pub mod stats;
+#[cfg(feature = "alloc-histogram")]
+pub mod histogram;
+mod macros;
 pub mod thread_cache;
 pub mod transfer_cache;
 
@@ -43,37 +46,6 @@ pub const PAGE_SIZE: usize = 1 << PAGE_SHIFT;
 
 // Re-export the allocator at crate root for convenience
 pub use allocator::RtMalloc;
-
-/// Increment a stats counter by 1.
-///
-/// Compiles to nothing when the `stats` feature is disabled.
-#[macro_export]
-macro_rules! stat_inc {
-    ($counter:ident) => {
-        #[cfg(feature = "stats")]
-        {
-            $crate::stats::STATS
-                .$counter
-                .fetch_add(1, ::core::sync::atomic::Ordering::Relaxed);
-        }
-    };
-}
-
-/// Add a value to a stats counter.
-///
-/// Compiles to nothing (including the value expression) when the `stats`
-/// feature is disabled.
-#[macro_export]
-macro_rules! stat_add {
-    ($counter:ident, $val:expr) => {
-        #[cfg(feature = "stats")]
-        {
-            $crate::stats::STATS
-                .$counter
-                .fetch_add($val as u64, ::core::sync::atomic::Ordering::Relaxed);
-        }
-    };
-}
 
 // Panic handler for staticlib builds (no_std has no default panic handler).
 // Only active when panic="abort" (i.e., the `fast` profile), not during normal checks.

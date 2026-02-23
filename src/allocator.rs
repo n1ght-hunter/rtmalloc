@@ -11,7 +11,7 @@
 
 use crate::PAGE_SHIFT;
 use crate::PAGE_SIZE;
-use crate::{stat_add, stat_inc};
+use crate::{hist_record, stat_add, stat_inc};
 use crate::central_free_list::CentralCache;
 use crate::page_heap::PageHeap;
 use crate::pagemap::PageMap;
@@ -159,6 +159,7 @@ unsafe impl GlobalAlloc for RtMalloc {
 
         stat_inc!(alloc_count);
         stat_add!(alloc_bytes, size as u64);
+        hist_record!(size);
 
         let align = layout.align();
 
@@ -451,5 +452,25 @@ impl RtMalloc {
         }
 
         aligned_addr as *mut u8
+    }
+}
+
+#[cfg(feature = "nightly")]
+unsafe impl core::alloc::Allocator for RtMalloc {
+    fn allocate(
+        &self,
+        layout: Layout,
+    ) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
+        let ptr = unsafe { GlobalAlloc::alloc(self, layout) };
+        if ptr.is_null() {
+            Err(core::alloc::AllocError)
+        } else {
+            let slice = core::ptr::slice_from_raw_parts_mut(ptr, layout.size());
+            Ok(unsafe { core::ptr::NonNull::new_unchecked(slice) })
+        }
+    }
+
+    unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: Layout) {
+        unsafe { GlobalAlloc::dealloc(self, ptr.as_ptr(), layout) }
     }
 }
