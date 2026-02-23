@@ -19,6 +19,7 @@ testing = []
 debug = ["std"]
 percpu = ["rseq/nightly", "nightly"]
 stats = []
+alloc-histogram = ["std"]
 
 [dependencies]
 cfg-if = "1"
