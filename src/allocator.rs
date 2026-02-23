@@ -11,6 +11,7 @@
 
 use crate::PAGE_SHIFT;
 use crate::PAGE_SIZE;
+use crate::{stat_add, stat_inc};
 use crate::central_free_list::CentralCache;
 use crate::page_heap::PageHeap;
 use crate::pagemap::PageMap;
@@ -156,6 +157,9 @@ unsafe impl GlobalAlloc for RtMalloc {
             return layout.align() as *mut u8;
         }
 
+        stat_inc!(alloc_count);
+        stat_add!(alloc_bytes, size as u64);
+
         let align = layout.align();
 
         if align <= 8 {
@@ -183,6 +187,8 @@ unsafe impl GlobalAlloc for RtMalloc {
         if layout.size() == 0 {
             return;
         }
+
+        stat_inc!(dealloc_count);
 
         // Look up the actual size class from the span metadata, like tcmalloc.
         // We cannot trust layout.size() because realloc may return the same
@@ -221,6 +227,8 @@ unsafe impl GlobalAlloc for RtMalloc {
             unsafe { self.dealloc(ptr, layout) };
             return layout.align() as *mut u8;
         }
+
+        stat_inc!(realloc_count);
 
         // Look up the REAL allocation size from span metadata, like tcmalloc.
         // We cannot trust layout.size() because prior reallocs may have returned
@@ -346,6 +354,8 @@ impl RtMalloc {
     cfg_if::cfg_if! {
         if #[cfg(not(feature = "percpu"))] {
             unsafe fn alloc_from_central(&self, size_class: usize) -> *mut u8 {
+                stat_inc!(thread_cache_misses);
+                stat_inc!(central_cache_hits);
                 let (count, head) = unsafe {
                     CENTRAL_CACHE
                         .get(size_class)
@@ -373,6 +383,8 @@ impl RtMalloc {
     }
 
     unsafe fn alloc_large(&self, layout: Layout) -> *mut u8 {
+        stat_inc!(page_heap_allocs);
+
         let size = layout.size();
         let align = layout.align();
         let size_pages = size.div_ceil(PAGE_SIZE);
