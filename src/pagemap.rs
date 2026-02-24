@@ -7,7 +7,7 @@
 //! allocated from the OS. Reads are lock-free (AtomicPtr with Acquire).
 //! Writes must happen under external synchronization (the page heap lock).
 
-use crate::PAGE_SIZE;
+use crate::config::PAGE_SIZE;
 use crate::platform;
 use crate::span::Span;
 use core::ptr;

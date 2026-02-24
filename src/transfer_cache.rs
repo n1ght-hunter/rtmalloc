@@ -13,8 +13,7 @@ use crate::span::FreeObject;
 use crate::sync::SpinMutex;
 use core::ptr;
 
-/// Maximum number of cached batches per size class.
-const MAX_SLOTS: usize = 64;
+use crate::config::MAX_TRANSFER_SLOTS;
 
 #[derive(Clone, Copy)]
 struct TransferCacheSlot {
@@ -24,7 +23,7 @@ struct TransferCacheSlot {
 
 /// Per-size-class transfer cache (LIFO stack of batches).
 struct TransferCacheInner {
-    slots: [TransferCacheSlot; MAX_SLOTS],
+    slots: [TransferCacheSlot; MAX_TRANSFER_SLOTS],
     used: usize,
 }
 
@@ -37,7 +36,7 @@ impl TransferCacheInner {
             slots: [TransferCacheSlot {
                 head: ptr::null_mut(),
                 tail: ptr::null_mut(),
-            }; MAX_SLOTS],
+            }; MAX_TRANSFER_SLOTS],
             used: 0,
         }
     }
@@ -54,7 +53,7 @@ impl TransferCacheInner {
 
     /// Push a batch. Returns true if successful, false if full.
     fn push(&mut self, head: *mut FreeObject, tail: *mut FreeObject) -> bool {
-        if self.used >= MAX_SLOTS {
+        if self.used >= MAX_TRANSFER_SLOTS {
             return false;
         }
         self.slots[self.used] = TransferCacheSlot { head, tail };
@@ -229,7 +228,7 @@ mod tests {
             let batch_size = size_class::class_info(4).batch_size;
 
             // Fill 64 slots + central fallthrough
-            for _ in 0..MAX_SLOTS + 1 {
+            for _ in 0..MAX_TRANSFER_SLOTS + 1 {
                 let (count, head) = tc.remove_range(4, batch_size, &central, &heap, pm);
                 assert!(count > 0);
 

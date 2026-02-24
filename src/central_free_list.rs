@@ -5,8 +5,7 @@
 //! When the central free list is empty, it requests a new span from the page heap
 //! and carves it into objects.
 
-use crate::PAGE_SHIFT;
-use crate::PAGE_SIZE;
+use crate::config::{PAGE_SIZE, PAGE_SHIFT};
 use crate::page_heap::PageHeap;
 use crate::pagemap::PageMap;
 use crate::size_class::{self, NUM_SIZE_CLASSES};

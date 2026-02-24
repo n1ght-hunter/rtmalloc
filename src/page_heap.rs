@@ -6,8 +6,7 @@
 //! - Grow the heap by requesting memory from the OS
 //! - Register/unregister spans in the page map
 
-use crate::PAGE_SHIFT;
-use crate::PAGE_SIZE;
+use crate::config::{PAGE_SIZE, PAGE_SHIFT};
 use crate::pagemap::PageMap;
 use crate::platform;
 use crate::span::{self, Span, SpanList, SpanState};
@@ -15,9 +14,7 @@ use core::ptr;
 #[cfg(feature = "debug")]
 use std::println;
 
-/// Maximum number of pages tracked in the free list array.
-/// Spans larger than this go into `large_spans`.
-const MAX_PAGES: usize = 128;
+use crate::config::MAX_PAGES;
 
 pub struct PageHeap {
     /// free_lists[k] holds free spans of exactly k pages (index 0 unused).

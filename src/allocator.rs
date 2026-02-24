@@ -9,8 +9,7 @@
 //! - `std` feature: `std::thread_local!` with const-init (no lazy init overhead)
 //! - neither: central free list only (locked, slowest)
 
-use crate::PAGE_SHIFT;
-use crate::PAGE_SIZE;
+use crate::config::{PAGE_SIZE, PAGE_SHIFT};
 use crate::{hist_record, stat_add, stat_inc};
 use crate::central_free_list::CentralCache;
 use crate::page_heap::PageHeap;

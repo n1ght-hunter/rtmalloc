@@ -1,16 +1,21 @@
-# Default size class configuration for rtmalloc.
+# Default configuration for rtmalloc.
 #
-# To customize, copy this file, edit the classes, and build with:
+# To customize, copy this file, edit, and build with:
 #   RTMALLOC_CLASSES=my_classes.toml cargo build
 #
-# Simple format — just list sizes (pages/batch auto-computed):
-#   classes = [16, 64, 256, 1024, 4096]
-#
-# Full control format:
-#   [[class]]
-#   size = 16
-#   pages = 1
-#   batch_size = 32
+# All [config] fields are optional — defaults shown below.
+# Size classes can use simple format (classes = [16, 64, ...])
+# or full control format ([[class]] with size/pages/batch_size).
+
+[config]
+page_size = 8192                    # must be power of 2
+thread_cache_size = 33554432        # 32 MiB total budget across all threads
+min_per_thread_cache = 524288       # 512 KiB minimum per-thread cache
+steal_amount = 65536                # 64 KiB scavenge growth increment
+max_free_list_length = 8192         # max objects per size class before returning
+max_overages = 3                    # consecutive overflows before shrinking
+max_transfer_slots = 64             # batches cached per size class
+max_pages = 128                     # page heap bucket count
 
 [[class]]
 size = 8

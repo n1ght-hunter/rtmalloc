@@ -4,7 +4,7 @@
 //! free list management. The table is configured via a TOML file at build time
 //! (see `default_classes.toml` and the `RTMALLOC_CLASSES` env var).
 
-use crate::PAGE_SIZE;
+use crate::config::PAGE_SIZE;
 
 /// Information about a single size class.
 #[derive(Clone, Copy)]

@@ -11,23 +11,12 @@ use crate::size_class::{self, NUM_SIZE_CLASSES};
 use crate::span::FreeObject;
 use crate::sync::SpinMutex;
 use crate::transfer_cache::TransferCacheArray;
+use crate::config::{
+    MAX_DYNAMIC_FREE_LIST_LENGTH, MAX_OVERAGES, MIN_PER_THREAD_CACHE_SIZE,
+    OVERALL_THREAD_CACHE_SIZE, STEAL_AMOUNT,
+};
 use core::ptr;
 use core::sync::atomic::{AtomicIsize, Ordering};
-
-/// Overall thread cache budget shared across all threads (32 MiB).
-const OVERALL_THREAD_CACHE_SIZE: usize = 32 * 1024 * 1024;
-
-/// Minimum per-thread cache size (512 KiB).
-const MIN_PER_THREAD_CACHE_SIZE: usize = 512 * 1024;
-
-/// Amount to steal from global budget during scavenge (64 KiB).
-const STEAL_AMOUNT: usize = 64 * 1024;
-
-/// Maximum dynamic free list length per size class.
-const MAX_DYNAMIC_FREE_LIST_LENGTH: u32 = 8192;
-
-/// Number of consecutive overages before shrinking max_length (gperftools: 3).
-const MAX_OVERAGES: u32 = 3;
 
 /// Unclaimed cache budget available for thread caches to claim.
 /// Starts at OVERALL_THREAD_CACHE_SIZE; each thread claims/returns portions.
