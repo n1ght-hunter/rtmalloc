@@ -23,6 +23,7 @@ struct BucketArray([AtomicU64; NUM_BUCKETS]);
 // SAFETY: AtomicU64 is Sync.
 unsafe impl Sync for BucketArray {}
 
+#[allow(clippy::declare_interior_mutable_const)]
 static BUCKETS: BucketArray = {
     const ZERO: AtomicU64 = AtomicU64::new(0);
     BucketArray([ZERO; NUM_BUCKETS])
@@ -90,7 +91,7 @@ pub fn suggest_classes(snap: &Snapshot, coverage: f64) -> Vec<usize> {
         .filter(|(_, c)| **c > 0)
         .map(|(i, c)| ((i + 1) * BUCKET_SIZE, *c))
         .collect();
-    pairs.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+    pairs.sort_unstable_by_key(|b| core::cmp::Reverse(b.1));
 
     let mut sizes = Vec::new();
     let mut covered = 0u64;

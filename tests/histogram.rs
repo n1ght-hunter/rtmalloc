@@ -151,8 +151,8 @@ fn test_optimal_layout_single_size() {
 #[test]
 fn test_optimal_layout_respects_max_classes() {
     let mut counts = [0u64; NUM_BUCKETS];
-    for i in 0..10 {
-        counts[i] = 100;
+    for count in counts.iter_mut().take(10) {
+        *count = 100;
     }
     let snap = histogram::Snapshot {
         counts,
