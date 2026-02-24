@@ -21,6 +21,58 @@ The main reasons for this are:
 - [ ] Impl profiling with an output to have custom class sizes for better cache performance
 - [ ] Find a way to run Miri without explicit `MIRIFLAGS` (currently needs `-Zmiri-ignore-leaks -Zmiri-permissive-provenance` because caching allocators hold memory in free lists and use integer↔pointer casts internally)
 
+## Usage
+
+Add rtmalloc as a dependency and set it as the global allocator:
+
+```rust
+use rtmalloc::RtMalloc;
+
+#[global_allocator]
+static GLOBAL: RtMalloc = RtMalloc;
+```
+
+For best performance on nightly Rust, enable the `nightly` feature for `#[thread_local]` support:
+
+```toml
+[dependencies]
+rtmalloc = { path = ".", features = ["nightly"] }
+```
+
+### Configuration
+
+All allocator tuning is done through a single TOML file. By default rtmalloc uses `default_classes.toml` in the crate root. To use a custom config, set the `RTMALLOC_CLASSES` env var at build time:
+
+```bash
+RTMALLOC_CLASSES=my_config.toml cargo build
+```
+
+The config has two sections — `[config]` for global knobs and `[[class]]` for size class definitions. All `[config]` fields are optional and default to sane values:
+
+```toml
+[config]
+page_size = 8192           # must be power of 2, >= 4096
+thread_cache_size = 33554432   # 32 MiB total thread cache budget
+max_transfer_slots = 64        # batches cached per size class
+max_pages = 128                # page heap bucket count
+
+# Size classes — listed smallest to largest, must be 8-byte aligned.
+# Each class can optionally specify pages and batch_size.
+[[class]]
+size = 8
+
+[[class]]
+size = 16
+
+# ... up to 63 classes
+```
+
+Alternatively, use the simple shorthand format for auto-tuned classes:
+
+```toml
+classes = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]
+```
+
 ## Benchmarks
 
 Benchmarks are still in progress, but the goal is to have rtmalloc be within 1% the speed of tcmalloc on a variety of workloads.
