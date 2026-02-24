@@ -1,65 +1,53 @@
 name: Benchmark PR
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+  pull_request:
 
 concurrency:
-  group: bench-pr-${{ github.event.workflow_run.pull_requests[0].number || github.run_id }}
+  group: bench-pr-v2-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 permissions:
   contents: read
   pull-requests: write
+  checks: read
 
 jobs:
-  check-paths:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request'
+  wait-for-ci:
     runs-on: ubuntu-latest
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
-      pr-number: ${{ steps.pr.outputs.number }}
-      head-sha: ${{ steps.pr.outputs.head_sha }}
-      base-sha: ${{ steps.pr.outputs.base_sha }}
-      head-ref: ${{ steps.pr.outputs.head_ref }}
-      base-ref: ${{ steps.pr.outputs.base_ref }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - id: pr
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          PR_NUMBER="${{ github.event.workflow_run.pull_requests[0].number }}"
-          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "head_sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
-          echo "base_sha=${{ github.event.workflow_run.pull_requests[0].base.sha }}" >> "$GITHUB_OUTPUT"
-          PR_JSON=$(gh pr view "$PR_NUMBER" --json headRefName,baseRefName)
-          echo "head_ref=$(echo "$PR_JSON" | jq -r .headRefName)" >> "$GITHUB_OUTPUT"
-          echo "base_ref=$(echo "$PR_JSON" | jq -r .baseRefName)" >> "$GITHUB_OUTPUT"
+
       - id: filter
         run: |
-          BASE="${{ steps.pr.outputs.base_sha }}"
-          HEAD="${{ steps.pr.outputs.head_sha }}"
-          CHANGED=$(git diff --name-only "$BASE"..."$HEAD" 2>/dev/null || echo "FORCE_RUN")
-          if echo "$CHANGED" | grep -qE '^(src/|rseq/|bench/|Cargo\.(toml|lock)$)|FORCE_RUN'; then
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "FORCE_RUN")
+          if echo "$CHANGED" | grep -qE '^(src/|rseq/|bench/|rtmalloc\.toml$|build\.rs$|\.github/|Cargo\.(toml|lock)$)|FORCE_RUN'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Wait for CI to pass
+        if: steps.filter.outputs.relevant == 'true'
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          check-name: check
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 15
+
   # ---- Criterion microbenchmarks ----
   criterion:
-    needs: check-paths
-    if: needs.check-paths.outputs.relevant == 'true'
+    needs: wait-for-ci
+    if: needs.wait-for-ci.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.check-paths.outputs.head-sha }}
+          fetch-depth: 0
 
       - run: rustup show
 
@@ -75,6 +63,33 @@ jobs:
           key: bench-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: bench-${{ runner.os }}-
 
+      - name: Restore baseline criterion results
+        id: criterion-baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: baseline-criterion.json
+          key: baseline-criterion-${{ github.event.pull_request.base.sha }}
+          restore-keys: baseline-criterion-
+
+      - name: Build baseline (cache miss)
+        if: ${{ !steps.criterion-baseline.outputs.cache-matched-key }}
+        run: |
+          git checkout origin/${{ github.base_ref }}
+          cargo bench -p rtmalloc-bench --bench alloc_bench -- --noplot
+          cp -r target/criterion target/criterion-base
+          rm -rf target/criterion
+          git checkout ${{ github.event.pull_request.head.sha }}
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Generate and cache baseline (cache miss)
+        if: ${{ !steps.criterion-baseline.outputs.cache-matched-key }}
+        run: |
+          uv run .github/scripts/extract-criterion.py \
+            --head target/criterion-base \
+            --output-baseline baseline-criterion.json
+          rm -rf target/criterion-base
+
       - uses: bencherdev/bencher@main
 
       - name: Track PR Criterion benchmarks
@@ -82,33 +97,47 @@ jobs:
           bencher run \
             --project rtmalloc \
             --token '${{ secrets.BENCHER_API_TOKEN }}' \
-            --branch '${{ needs.check-paths.outputs.head-ref }}' \
-            --hash '${{ needs.check-paths.outputs.head-sha }}' \
-            --start-point '${{ needs.check-paths.outputs.base-ref }}' \
-            --start-point-hash '${{ needs.check-paths.outputs.base-sha }}' \
+            --branch '${{ github.head_ref }}' \
+            --hash '${{ github.event.pull_request.head.sha }}' \
+            --start-point '${{ github.base_ref }}' \
             --start-point-clone-thresholds \
             --start-point-reset \
             --testbed github-actions \
             --adapter rust_criterion \
             --err \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            --ci-number '${{ needs.check-paths.outputs.pr-number }}' \
+            --ci-number '${{ github.event.pull_request.number }}' \
             "cargo bench -p rtmalloc-bench --bench alloc_bench -- --noplot"
+
+      - name: Generate comparison comment
+        if: ${{ hashFiles('baseline-criterion.json') != '' }}
+        run: |
+          uv run .github/scripts/extract-criterion.py \
+            --base-json baseline-criterion.json \
+            --head target/criterion \
+            --output-comment criterion-comment.md
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: criterion-comment
+          path: criterion-comment.md
+          if-no-files-found: ignore
 
   # ---- mimalloc-bench real-world programs ----
   mimalloc-bench:
-    needs: check-paths
-    if: needs.check-paths.outputs.relevant == 'true'
+    needs: wait-for-ci
+    if: needs.wait-for-ci.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.check-paths.outputs.head-sha }}
+          fetch-depth: 0
 
       - run: rustup show
 
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake autoconf libtool ninja-build
+        run: sudo apt-get update && sudo apt-get install -y cmake autoconf libtool ninja-build dos2unix
 
       - uses: actions/cache@v4
         with:
@@ -120,17 +149,42 @@ jobs:
           restore-keys: bench-${{ runner.os }}-
 
       - uses: actions/cache@v4
-        id: mimalloc-bench-cache
         with:
           path: mimalloc-bench
           key: mimalloc-bench-${{ runner.os }}-v2
 
       - name: Clone and build mimalloc-bench
-        if: steps.mimalloc-bench-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 https://github.com/daanx/mimalloc-bench.git
+          if [ ! -d mimalloc-bench ]; then
+            git clone --depth 1 https://github.com/daanx/mimalloc-bench.git
+          fi
           cd mimalloc-bench
-          ./build-bench-env.sh mi tc je sn
+          ./build-bench-env.sh mi tc je sn bench
+
+      - name: Restore baseline .so files
+        id: so-baseline
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            librtmalloc_nightly.so
+            librtmalloc_std.so
+          key: baseline-rtmalloc-so-${{ github.event.pull_request.base.sha }}
+          restore-keys: baseline-rtmalloc-so-
+
+      - name: Build baseline .so (cache miss)
+        if: ${{ !steps.so-baseline.outputs.cache-matched-key }}
+        run: |
+          git checkout origin/${{ github.base_ref }}
+          cargo rustc -p rtmalloc --features c-abi,nightly --crate-type cdylib --profile fast
+          cp target/fast/librtmalloc.so librtmalloc_nightly.so
+          cargo rustc -p rtmalloc --features c-abi,std --crate-type cdylib --profile fast
+          cp target/fast/librtmalloc.so librtmalloc_std.so
+          git checkout ${{ github.event.pull_request.head.sha }}
+
+      - name: Prepare baseline .so files
+        run: |
+          mv librtmalloc_nightly.so librtmalloc_nightly_base.so
+          mv librtmalloc_std.so librtmalloc_std_base.so
 
       - name: Build rtmalloc shared libraries
         run: |
@@ -147,6 +201,8 @@ jobs:
           cat > "$REPO_ROOT/ext.txt" <<EOF
           rt_nightly $REPO_ROOT/librtmalloc_nightly.so
           rt_std $REPO_ROOT/librtmalloc_std.so
+          rt_nightly_base $REPO_ROOT/librtmalloc_nightly_base.so
+          rt_std_base $REPO_ROOT/librtmalloc_std_base.so
           EOF
 
           ../../bench.sh --external="$REPO_ROOT/ext.txt" mi tc je sn allt
@@ -159,7 +215,9 @@ jobs:
         run: |
           uv run .github/scripts/parse-mimalloc-bench.py \
             --csv benchres.csv \
-            --output-bmf bench-results-bmf.json
+            --base-prefix _base \
+            --output-comment mimalloc-comment.md \
+            --output-bmf mimalloc-bench-results-bmf.json
 
       - uses: bencherdev/bencher@main
 
@@ -168,15 +226,58 @@ jobs:
           bencher run \
             --project rtmalloc \
             --token '${{ secrets.BENCHER_API_TOKEN }}' \
-            --branch '${{ needs.check-paths.outputs.head-ref }}' \
-            --hash '${{ needs.check-paths.outputs.head-sha }}' \
-            --start-point '${{ needs.check-paths.outputs.base-ref }}' \
-            --start-point-hash '${{ needs.check-paths.outputs.base-sha }}' \
+            --branch '${{ github.head_ref }}' \
+            --hash '${{ github.event.pull_request.head.sha }}' \
+            --start-point '${{ github.base_ref }}' \
             --start-point-clone-thresholds \
             --start-point-reset \
             --testbed github-actions \
             --adapter json \
-            --file bench-results-bmf.json \
+            --file mimalloc-bench-results-bmf.json \
             --err \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
-            --ci-number '${{ needs.check-paths.outputs.pr-number }}'
+            --ci-number '${{ github.event.pull_request.number }}'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mimalloc-comment
+          path: mimalloc-comment.md
+          if-no-files-found: ignore
+
+  # ---- Combined PR comment ----
+  report:
+    needs: [wait-for-ci, criterion, mimalloc-bench]
+    if: >-
+      always() &&
+      needs.wait-for-ci.outputs.relevant == 'true' &&
+      (needs.criterion.result == 'success' || needs.mimalloc-bench.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: bench-artifacts
+          merge-multiple: true
+
+      - name: Combine comment
+        run: |
+          {
+            echo "## Benchmark Results"
+            echo ""
+            echo "> Comparing \`${{ github.head_ref }}\` vs \`${{ github.base_ref }}\`"
+            echo ""
+            if [ -f bench-artifacts/criterion-comment.md ]; then
+              cat bench-artifacts/criterion-comment.md
+              echo ""
+            fi
+            if [ -f bench-artifacts/mimalloc-comment.md ]; then
+              cat bench-artifacts/mimalloc-comment.md
+              echo ""
+            fi
+          } > combined-comment.md
+
+      - uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: combined-comment.md
+          comment-tag: rtmalloc-bench
