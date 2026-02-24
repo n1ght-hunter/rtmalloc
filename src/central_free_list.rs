@@ -328,14 +328,6 @@ pub struct CentralCache {
     lists: [SpinMutex<CentralFreeList>; NUM_SIZE_CLASSES],
 }
 
-// Can't use a simple const init with a loop for SpinMutex<CentralFreeList>,
-// so we use a macro.
-macro_rules! central_cache_init {
-    ($($i:literal),* $(,)?) => {
-        [$(SpinMutex::new(CentralFreeList::new($i))),*]
-    };
-}
-
 impl Default for CentralCache {
     fn default() -> Self {
         Self::new()
@@ -344,13 +336,13 @@ impl Default for CentralCache {
 
 impl CentralCache {
     pub const fn new() -> Self {
-        Self {
-            lists: central_cache_init![
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
-                44, 45,
-            ],
+        let mut lists = [const { SpinMutex::new(CentralFreeList::new(0)) }; NUM_SIZE_CLASSES];
+        let mut i = 0;
+        while i < NUM_SIZE_CLASSES {
+            lists[i] = SpinMutex::new(CentralFreeList::new(i));
+            i += 1;
         }
+        Self { lists }
     }
 
     /// Get a reference to the central free list for a size class.

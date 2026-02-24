@@ -181,7 +181,7 @@ impl ThreadCache {
         page_heap: &SpinMutex<PageHeap>,
         pagemap: &PageMap,
     ) {
-        for cls in 1..NUM_SIZE_CLASSES {
+        for cls in 1..size_class::NUM_SIZE_CLASSES {
             let list = &mut self.lists[cls];
             if list.length > 0 {
                 let info = size_class::class_info(cls);
@@ -214,7 +214,7 @@ impl ThreadCache {
     ///
     /// # Safety
     ///
-    /// `size_class` must be a valid index in `1..NUM_SIZE_CLASSES`.
+    /// `size_class` must be a valid index in `1..size_class::NUM_SIZE_CLASSES`.
     #[inline]
     pub unsafe fn allocate(
         &mut self,
@@ -396,7 +396,7 @@ impl ThreadCache {
         page_heap: &SpinMutex<PageHeap>,
         pagemap: &PageMap,
     ) {
-        for cls in 1..NUM_SIZE_CLASSES {
+        for cls in 1..size_class::NUM_SIZE_CLASSES {
             let list = &mut self.lists[cls];
             let lwm = list.low_water_mark;
 
