@@ -25,6 +25,10 @@ alloc-histogram = ["std"]
 cfg-if = "1"
 rseq = { path = "rseq", optional = true }
 
+[build-dependencies]
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+
 
 [profile.fast]
 inherits = "release"

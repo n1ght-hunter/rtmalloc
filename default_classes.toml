@@ -1,0 +1,247 @@
+# Default size class configuration for rtmalloc.
+#
+# To customize, copy this file, edit the classes, and build with:
+#   RTMALLOC_CLASSES=my_classes.toml cargo build
+#
+# Simple format — just list sizes (pages/batch auto-computed):
+#   classes = [16, 64, 256, 1024, 4096]
+#
+# Full control format:
+#   [[class]]
+#   size = 16
+#   pages = 1
+#   batch_size = 32
+
+[[class]]
+size = 8
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 16
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 24
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 32
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 40
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 48
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 56
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 64
+pages = 1
+batch_size = 32
+
+# 16-byte increments
+[[class]]
+size = 80
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 96
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 112
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 128
+pages = 1
+batch_size = 32
+
+# 32-byte increments
+[[class]]
+size = 160
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 192
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 224
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 256
+pages = 1
+batch_size = 32
+
+# 64-byte increments
+[[class]]
+size = 320
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 384
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 448
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 512
+pages = 1
+batch_size = 32
+
+# 128-byte increments
+[[class]]
+size = 640
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 768
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 896
+pages = 1
+batch_size = 32
+
+[[class]]
+size = 1024
+pages = 1
+batch_size = 32
+
+# 256-byte increments
+[[class]]
+size = 1280
+pages = 2
+batch_size = 32
+
+[[class]]
+size = 1536
+pages = 2
+batch_size = 32
+
+[[class]]
+size = 1792
+pages = 2
+batch_size = 32
+
+[[class]]
+size = 2048
+pages = 2
+batch_size = 32
+
+# 512-byte increments
+[[class]]
+size = 2560
+pages = 4
+batch_size = 25
+
+[[class]]
+size = 3072
+pages = 4
+batch_size = 21
+
+[[class]]
+size = 3584
+pages = 4
+batch_size = 18
+
+[[class]]
+size = 4096
+pages = 4
+batch_size = 16
+
+# 1024-byte increments
+[[class]]
+size = 5120
+pages = 5
+batch_size = 12
+
+[[class]]
+size = 6144
+pages = 6
+batch_size = 10
+
+[[class]]
+size = 7168
+pages = 7
+batch_size = 9
+
+[[class]]
+size = 8192
+pages = 8
+batch_size = 8
+
+# Larger sizes
+[[class]]
+size = 10240
+pages = 10
+batch_size = 6
+
+[[class]]
+size = 12288
+pages = 12
+batch_size = 5
+
+[[class]]
+size = 16384
+pages = 16
+batch_size = 4
+
+[[class]]
+size = 20480
+pages = 20
+batch_size = 3
+
+# Large size classes
+[[class]]
+size = 32768
+pages = 16
+batch_size = 2
+
+[[class]]
+size = 40960
+pages = 20
+batch_size = 2
+
+[[class]]
+size = 65536
+pages = 32
+batch_size = 2
+
+[[class]]
+size = 131072
+pages = 32
+batch_size = 2
+
+[[class]]
+size = 262144
+pages = 64
+batch_size = 2
