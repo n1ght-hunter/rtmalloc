@@ -73,6 +73,58 @@ Alternatively, use the simple shorthand format for auto-tuned classes:
 classes = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]
 ```
 
+<details>
+<summary><strong>Profiling & Optimising Size Classes</strong></summary>
+
+rtmalloc ships with a built-in allocation histogram that records every allocation size at runtime. You can use it to generate a custom size class config tuned to your workload.
+
+#### 1. Enable the histogram
+
+```toml
+[dependencies]
+rtmalloc = { path = ".", features = ["alloc-histogram", "nightly"] }
+```
+
+#### 2. Run your workload, then print the report
+
+```rust
+// At shutdown or after a representative run:
+rtmalloc::histogram::print_report();
+```
+
+This prints a bucket-by-bucket breakdown plus a suggested class layout with waste stats and a ready-to-use TOML snippet.
+
+#### 3. Export a config file directly
+
+```rust
+let toml = rtmalloc::histogram::export_toml(64, 0.125);
+std::fs::write("profile_classes.toml", toml).unwrap();
+```
+
+#### 4. Rebuild with the profiled config
+
+```bash
+RTMALLOC_CLASSES=profile_classes.toml cargo build --release
+```
+
+The `optimal_layout` algorithm greedily merges adjacent size buckets to minimise internal fragmentation while staying under a waste-per-class threshold (`max_waste_pct`). This is the same PGO-style feedback loop that tcmalloc uses internally.
+
+</details>
+
+<details>
+<summary><strong>Runtime Stats</strong></summary>
+
+Enable the `stats` feature to collect allocation/deallocation counters with zero contention (per-thread atomics):
+
+```toml
+[dependencies]
+rtmalloc = { path = ".", features = ["stats", "nightly"] }
+```
+
+Stats are recorded via the `stat_inc!` / `stat_add!` macros inside the allocator. When the feature is disabled, these compile to nothing.
+
+</details>
+
 ## Benchmarks
 
 Benchmarks are still in progress, but the goal is to have rtmalloc be within 1% the speed of tcmalloc on a variety of workloads.

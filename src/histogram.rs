@@ -7,7 +7,9 @@
 extern crate std;
 
 use core::sync::atomic::{AtomicU64, Ordering};
+use std::format;
 use std::println;
+use std::string::String;
 use std::vec::Vec;
 
 /// Maximum allocation size tracked in a bucket (inclusive).
@@ -213,6 +215,27 @@ pub fn optimal_layout(snap: &Snapshot, max_classes: usize, max_waste_pct: f64) -
     }
 }
 
+impl ClassLayout {
+    /// Format this layout as a TOML config string suitable for `RTMALLOC_CLASSES`.
+    ///
+    /// Uses the simple `classes = [...]` format so build.rs auto-tunes
+    /// pages and batch_size for each class.
+    pub fn to_toml(&self) -> String {
+        let sizes: Vec<String> = self.classes.iter().map(|s| format!("{}", s)).collect();
+        format!("classes = [{}]\n", sizes.join(", "))
+    }
+}
+
+/// Take a snapshot, compute an optimal layout, and return it as a TOML string
+/// ready to be written to a file and used with `RTMALLOC_CLASSES`.
+///
+/// `max_classes` and `max_waste_pct` are forwarded to [`optimal_layout`].
+pub fn export_toml(max_classes: usize, max_waste_pct: f64) -> String {
+    let snap = snapshot();
+    let layout = optimal_layout(&snap, max_classes, max_waste_pct);
+    layout.to_toml()
+}
+
 /// Print a human-readable histogram report to stdout.
 ///
 /// Shows all non-zero buckets with count, percentage, and cumulative percentage.
@@ -278,6 +301,7 @@ pub fn print_report() {
             layout.avg_waste_bytes,
             layout.fragmentation_ratio * 100.0
         );
+        println!("\nTOML config (save to a file, build with RTMALLOC_CLASSES=<path>):");
+        println!("{}", layout.to_toml());
     }
-    println!();
 }
