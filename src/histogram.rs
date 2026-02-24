@@ -163,9 +163,8 @@ pub fn optimal_layout(snap: &Snapshot, max_classes: usize, max_waste_pct: f64) -
         }
 
         // Find the adjacent pair whose merge adds the least waste.
-        let best = (0..ranges.len() - 1).min_by_key(|&i| {
-            ranges[i].1 * (ranges[i + 1].0 - ranges[i].0) as u64
-        });
+        let best = (0..ranges.len() - 1)
+            .min_by_key(|&i| ranges[i].1 * (ranges[i + 1].0 - ranges[i].0) as u64);
 
         let i = match best {
             Some(i) => i,
@@ -178,8 +177,7 @@ pub fn optimal_layout(snap: &Snapshot, max_classes: usize, max_waste_pct: f64) -
         let added_waste = left_count * (right_class - ranges[i].0) as u64;
         let merged_waste = left_waste + added_waste + right_waste;
         let merged_count = left_count + right_count;
-        let merged_waste_ratio =
-            merged_waste as f64 / (merged_count as f64 * right_class as f64);
+        let merged_waste_ratio = merged_waste as f64 / (merged_count as f64 * right_class as f64);
 
         if merged_waste_ratio > max_waste_pct {
             break;
@@ -192,10 +190,7 @@ pub fn optimal_layout(snap: &Snapshot, max_classes: usize, max_waste_pct: f64) -
     // Compute summary stats.
     let total_count: u64 = ranges.iter().map(|(_, c, _)| *c).sum();
     let total_waste: u64 = ranges.iter().map(|(_, _, w)| *w).sum();
-    let total_alloc_bytes: u64 = ranges
-        .iter()
-        .map(|&(sz, c, _)| (sz as u64) * c)
-        .sum();
+    let total_alloc_bytes: u64 = ranges.iter().map(|&(sz, c, _)| (sz as u64) * c).sum();
 
     let avg_waste_bytes = if total_count > 0 {
         total_waste as f64 / total_count as f64
@@ -269,10 +264,7 @@ pub fn print_report() {
         "  {:>6}   {:>12}   {:>7}   {:>10}",
         "Size", "Count", "%", "Cumulative"
     );
-    println!(
-        "  {:->6}   {:->12}   {:->7}   {:->10}",
-        "", "", "", ""
-    );
+    println!("  {:->6}   {:->12}   {:->7}   {:->10}", "", "", "", "");
 
     let mut cumulative = 0u64;
     for (i, &count) in snap.counts.iter().enumerate() {

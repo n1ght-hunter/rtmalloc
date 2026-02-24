@@ -124,4 +124,3 @@ pub fn snapshot() -> Snapshot {
         span_coalesces: s.span_coalesces.load(Ordering::Relaxed),
     }
 }
-

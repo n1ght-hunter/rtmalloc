@@ -9,13 +9,13 @@
 //! - `std` feature: `std::thread_local!` with const-init (no lazy init overhead)
 //! - neither: central free list only (locked, slowest)
 
-use crate::config::{PAGE_SIZE, PAGE_SHIFT};
-use crate::{hist_record, stat_add, stat_inc};
 use crate::central_free_list::CentralCache;
+use crate::config::{PAGE_SHIFT, PAGE_SIZE};
 use crate::page_heap::PageHeap;
 use crate::pagemap::PageMap;
 use crate::size_class;
 use crate::sync::SpinMutex;
+use crate::{hist_record, stat_add, stat_inc};
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr;
 

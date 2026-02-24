@@ -1,7 +1,7 @@
 //! Unix virtual memory implementation using mmap/munmap.
 
-use core::ffi::c_void;
 use crate::config::PAGE_SIZE;
+use core::ffi::c_void;
 
 const PROT_READ: i32 = 0x1;
 const PROT_WRITE: i32 = 0x2;
@@ -26,7 +26,6 @@ unsafe extern "C" {
 }
 
 pub unsafe fn page_alloc(size: usize) -> *mut u8 {
-
     let raw = unsafe {
         mmap(
             core::ptr::null_mut(),

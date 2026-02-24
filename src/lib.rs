@@ -26,17 +26,17 @@ pub mod central_free_list;
 pub mod cpu_cache;
 #[cfg(feature = "ffi")]
 pub mod ffi;
+#[cfg(feature = "alloc-histogram")]
+pub mod histogram;
+mod macros;
 pub mod page_heap;
 pub mod pagemap;
 pub mod platform;
 pub mod size_class;
 pub mod span;
-pub mod sync;
 #[cfg(feature = "stats")]
 pub mod stats;
-#[cfg(feature = "alloc-histogram")]
-pub mod histogram;
-mod macros;
+pub mod sync;
 pub mod thread_cache;
 pub mod transfer_cache;
 

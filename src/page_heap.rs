@@ -6,7 +6,7 @@
 //! - Grow the heap by requesting memory from the OS
 //! - Register/unregister spans in the page map
 
-use crate::config::{PAGE_SIZE, PAGE_SHIFT};
+use crate::config::{PAGE_SHIFT, PAGE_SIZE};
 use crate::pagemap::PageMap;
 use crate::platform;
 use crate::span::{self, Span, SpanList, SpanState};

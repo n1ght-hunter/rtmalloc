@@ -30,7 +30,6 @@ impl SizeClassInfo {
 //   pub static SIZE_CLASSES: [SizeClassInfo; NUM_SIZE_CLASSES]
 include!(concat!(env!("OUT_DIR"), "/size_class_gen.rs"));
 
-
 pub const NUM_SIZE_CLASSES: usize = SIZE_CLASSES.len();
 pub const MAX_SMALL_SIZE: usize = SIZE_CLASSES[NUM_SIZE_CLASSES - 1].size;
 
@@ -38,7 +37,11 @@ pub const MAX_SMALL_SIZE: usize = SIZE_CLASSES[NUM_SIZE_CLASSES - 1].size;
 /// Maximum size covered by the fast lookup table.
 /// Capped at 1024 to keep the table small; sizes above this use linear scan.
 const SMALL_LOOKUP_MAX: usize = const {
-    if MAX_SMALL_SIZE < 1024 { MAX_SMALL_SIZE } else { 1024 }
+    if MAX_SMALL_SIZE < 1024 {
+        MAX_SMALL_SIZE
+    } else {
+        1024
+    }
 };
 
 /// Number of entries in the fast lookup table.

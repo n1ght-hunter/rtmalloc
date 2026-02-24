@@ -5,16 +5,16 @@
 //! is empty or full, it batches transfers to/from the central free list.
 
 use crate::central_free_list::CentralCache;
+use crate::config::{
+    MAX_DYNAMIC_FREE_LIST_LENGTH, MAX_OVERAGES, MIN_PER_THREAD_CACHE_SIZE,
+    OVERALL_THREAD_CACHE_SIZE, STEAL_AMOUNT,
+};
 use crate::page_heap::PageHeap;
 use crate::pagemap::PageMap;
 use crate::size_class::{self, NUM_SIZE_CLASSES};
 use crate::span::FreeObject;
 use crate::sync::SpinMutex;
 use crate::transfer_cache::TransferCacheArray;
-use crate::config::{
-    MAX_DYNAMIC_FREE_LIST_LENGTH, MAX_OVERAGES, MIN_PER_THREAD_CACHE_SIZE,
-    OVERALL_THREAD_CACHE_SIZE, STEAL_AMOUNT,
-};
 use core::ptr;
 use core::sync::atomic::{AtomicIsize, Ordering};
 

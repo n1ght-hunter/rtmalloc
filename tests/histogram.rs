@@ -5,8 +5,8 @@
 #![cfg(feature = "alloc-histogram")]
 #![feature(allocator_api)]
 
-use rtmalloc::histogram::{self, NUM_BUCKETS, MAX_TRACKED};
 use rtmalloc::RtMalloc;
+use rtmalloc::histogram::{self, MAX_TRACKED, NUM_BUCKETS};
 
 #[test]
 fn test_snapshot_accessible() {
@@ -21,8 +21,14 @@ fn test_record_small_lands_in_correct_bucket() {
     histogram::record(8);
     histogram::record(16);
     let after = histogram::snapshot();
-    assert!(after.counts[0] > before.counts[0], "bucket 0 (sizes 1-8) should increment");
-    assert!(after.counts[1] > before.counts[1], "bucket 1 (sizes 9-16) should increment");
+    assert!(
+        after.counts[0] > before.counts[0],
+        "bucket 0 (sizes 1-8) should increment"
+    );
+    assert!(
+        after.counts[1] > before.counts[1],
+        "bucket 1 (sizes 9-16) should increment"
+    );
 }
 
 #[test]
@@ -72,7 +78,10 @@ fn test_suggest_classes_empty() {
 fn test_suggest_classes_single_dominant_size() {
     let mut counts = [0u64; NUM_BUCKETS];
     counts[1] = 1000;
-    let snap = histogram::Snapshot { counts, overflow: 0 };
+    let snap = histogram::Snapshot {
+        counts,
+        overflow: 0,
+    };
     let classes = histogram::suggest_classes(&snap, 0.99);
     assert_eq!(classes, vec![16]);
 }
@@ -83,7 +92,10 @@ fn test_suggest_classes_covers_target_fraction() {
     counts[0] = 600;
     counts[1] = 300;
     counts[2] = 100;
-    let snap = histogram::Snapshot { counts, overflow: 0 };
+    let snap = histogram::Snapshot {
+        counts,
+        overflow: 0,
+    };
 
     let classes_90 = histogram::suggest_classes(&snap, 0.90);
     assert!(classes_90.contains(&8));
@@ -100,7 +112,10 @@ fn test_suggest_classes_is_sorted_ascending() {
     counts[3] = 500;
     counts[0] = 300;
     counts[7] = 200;
-    let snap = histogram::Snapshot { counts, overflow: 0 };
+    let snap = histogram::Snapshot {
+        counts,
+        overflow: 0,
+    };
     let classes = histogram::suggest_classes(&snap, 1.0);
     for w in classes.windows(2) {
         assert!(w[0] < w[1], "classes must be sorted ascending");
@@ -125,7 +140,10 @@ fn test_optimal_layout_empty() {
 fn test_optimal_layout_single_size() {
     let mut counts = [0u64; NUM_BUCKETS];
     counts[1] = 1000;
-    let snap = histogram::Snapshot { counts, overflow: 0 };
+    let snap = histogram::Snapshot {
+        counts,
+        overflow: 0,
+    };
     let layout = histogram::optimal_layout(&snap, 64, 0.125);
     assert_eq!(layout.classes, vec![16]);
 }
@@ -136,7 +154,10 @@ fn test_optimal_layout_respects_max_classes() {
     for i in 0..10 {
         counts[i] = 100;
     }
-    let snap = histogram::Snapshot { counts, overflow: 0 };
+    let snap = histogram::Snapshot {
+        counts,
+        overflow: 0,
+    };
     let layout = histogram::optimal_layout(&snap, 5, 1.0);
     assert!(
         layout.classes.len() <= 5,
@@ -150,7 +171,10 @@ fn test_optimal_layout_respects_max_waste_pct() {
     let mut counts = [0u64; NUM_BUCKETS];
     counts[0] = 1000;
     counts[NUM_BUCKETS - 1] = 1000;
-    let snap = histogram::Snapshot { counts, overflow: 0 };
+    let snap = histogram::Snapshot {
+        counts,
+        overflow: 0,
+    };
     let layout = histogram::optimal_layout(&snap, 1, 0.125);
     assert_eq!(
         layout.classes.len(),
@@ -165,7 +189,10 @@ fn test_optimal_layout_classes_sorted_ascending() {
     counts[0] = 500;
     counts[2] = 300;
     counts[5] = 200;
-    let snap = histogram::Snapshot { counts, overflow: 0 };
+    let snap = histogram::Snapshot {
+        counts,
+        overflow: 0,
+    };
     let layout = histogram::optimal_layout(&snap, 64, 0.125);
     for w in layout.classes.windows(2) {
         assert!(w[0] < w[1]);
@@ -177,7 +204,10 @@ fn test_optimal_layout_stats_consistent() {
     let mut counts = [0u64; NUM_BUCKETS];
     counts[0] = 400;
     counts[1] = 600;
-    let snap = histogram::Snapshot { counts, overflow: 0 };
+    let snap = histogram::Snapshot {
+        counts,
+        overflow: 0,
+    };
     let layout = histogram::optimal_layout(&snap, 64, 0.125);
     assert!(layout.avg_waste_bytes >= 0.0);
     assert!(layout.fragmentation_ratio >= 0.0);
@@ -212,5 +242,9 @@ fn test_real_allocations_are_recorded() {
         .map(|(a, b)| a - b)
         .sum::<u64>()
         + (after.overflow - before.overflow);
-    assert!(delta >= 3, "expected at least 3 recorded allocations, got {}", delta);
+    assert!(
+        delta >= 3,
+        "expected at least 3 recorded allocations, got {}",
+        delta
+    );
 }

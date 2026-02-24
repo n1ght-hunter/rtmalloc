@@ -13,9 +13,9 @@ fn auto_pages(size: usize, page_size: usize) -> usize {
     if size <= page_size {
         1
     } else if size <= page_size * 4 {
-        (size * 8 + page_size - 1) / page_size
+        (size * 8).div_ceil(page_size)
     } else {
-        (size * 2 + page_size - 1) / page_size
+        (size * 2).div_ceil(page_size)
     }
 }
 
