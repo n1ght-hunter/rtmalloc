@@ -449,26 +449,6 @@ impl ThreadCache {
     }
 }
 
-// Drop flushes cached objects back to the global caches on thread exit.
-// Gated on (nightly || std) because TRANSFER_CACHE only exists with those features.
-// Gated on not(test) because tests create ThreadCaches with local infrastructure;
-// flushing those objects to the global caches would corrupt state.
-#[cfg(all(not(test), any(feature = "nightly", feature = "std")))]
-impl Drop for ThreadCache {
-    fn drop(&mut self) {
-        if self.is_initialized() {
-            unsafe {
-                self.flush_and_destroy(
-                    &crate::allocator::TRANSFER_CACHE,
-                    &crate::allocator::CENTRAL_CACHE,
-                    &crate::allocator::PAGE_HEAP,
-                    &crate::allocator::PAGE_MAP,
-                );
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -23,7 +23,7 @@ cfg_if::cfg_if! {
     if #[cfg(feature = "percpu")] {
         use crate::cpu_cache;
         use crate::transfer_cache::TransferCacheArray;
-    } else if #[cfg(any(feature = "nightly", feature = "std"))] {
+    } else if #[cfg(all(not(feature = "percpu"), any(feature = "nightly", feature = "std")))] {
         use crate::thread_cache::ThreadCache;
         use crate::transfer_cache::TransferCacheArray;
     }
@@ -47,69 +47,106 @@ cfg_if::cfg_if! {
     }
 }
 
+// --- Shared types and functions for nightly + std paths ---
+
+#[cfg(all(not(feature = "percpu"), any(feature = "nightly", feature = "std")))]
+#[derive(Clone, Copy, PartialEq)]
+#[repr(u8)]
+enum TlsState {
+    Uninitialized = 0,
+    Active = 1,
+    Destroyed = 2,
+}
+
+/// Thread-local slot holding the state machine and cache. ThreadCache has no
+/// Drop impl, so std::thread_local! won't call __cxa_thread_atexit_impl —
+/// no LD_PRELOAD recursion. Cleanup is explicit via `destroy()` from Guard::drop.
+#[cfg(all(not(feature = "percpu"), any(feature = "nightly", feature = "std")))]
+struct TcSlot {
+    state: TlsState,
+    cache: ThreadCache,
+}
+
+#[cfg(all(not(feature = "percpu"), any(feature = "nightly", feature = "std")))]
+impl TcSlot {
+    #[inline(always)]
+    fn tc(&mut self) -> &mut ThreadCache {
+        &mut self.cache
+    }
+
+    #[cold]
+    #[inline(never)]
+    unsafe fn init(&mut self) {
+        self.cache.init();
+        // Active BEFORE register — reentrant mallocs from Guard registration
+        // see Active state and use the thread cache normally.
+        self.state = TlsState::Active;
+        tc_cleanup::register();
+    }
+
+    #[cold]
+    #[allow(dead_code)] // Only called from tc_cleanup::Guard::drop (requires std)
+    unsafe fn destroy(&mut self) {
+        if self.state == TlsState::Active {
+            self.state = TlsState::Destroyed;
+            unsafe {
+                self.cache.flush_and_destroy(
+                    &TRANSFER_CACHE,
+                    &CENTRAL_CACHE,
+                    &PAGE_HEAP,
+                    &PAGE_MAP,
+                );
+            }
+        }
+    }
+}
+
+// --- Thread-local storage declarations ---
+
 cfg_if::cfg_if! {
     if #[cfg(feature = "percpu")] {
         // Per-CPU cache via rseq — no thread-local cache needed.
     } else if #[cfg(feature = "nightly")] {
-        #[derive(Clone, Copy, PartialEq)]
-        #[repr(u8)]
-        enum TlsState {
-            Uninitialized = 0,
-            Active = 1,
-            Destroyed = 2,
-        }
-
-        struct TlsSlot<T> {
-            state: TlsState,
-            content: T,
-        }
-
-        /// Get a raw mutable pointer to the thread-local ThreadCache.
-        #[inline(always)]
-        unsafe fn tc() -> *mut ThreadCache {
-            unsafe { core::ptr::addr_of_mut!(TC.content) }
-        }
-
         #[thread_local]
-        static mut TC: TlsSlot<ThreadCache> = TlsSlot {
+        static mut TC: TcSlot = TcSlot {
             state: TlsState::Uninitialized,
-            content: ThreadCache::new_const(),
+            cache: ThreadCache::new_const(),
         };
 
-        /// Flush the ThreadCache and mark TC as Destroyed (reentrancy-safe).
-        #[cold]
-        #[allow(dead_code)] // Only called from cleanup modules (std feature)
-        unsafe fn tc_destroy() {
-            unsafe {
-                if TC.state == TlsState::Active {
-                    TC.state = TlsState::Destroyed;
-                    (*tc()).flush_and_destroy(
-                        &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP,
-                    );
-                }
-            }
+        #[inline(always)]
+        unsafe fn tc_slot() -> &'static mut TcSlot {
+            unsafe { &mut *core::ptr::addr_of_mut!(TC) }
         }
-
-        /// Initialize the thread-local ThreadCache.
-        #[cold]
-        #[inline(never)]
-        unsafe fn tc_init() {
-            unsafe { (*tc()).init() };
-            // Set BEFORE cleanup registration — if register() triggers allocation,
-            // the reentrant call sees TC as Active and uses it normally.
-            unsafe { TC.state = TlsState::Active };
-            tc_cleanup::register();
+    } else if #[cfg(feature = "std")] {
+        std::thread_local! {
+            static TC_CELL: core::cell::UnsafeCell<TcSlot> = const {
+                core::cell::UnsafeCell::new(TcSlot {
+                    state: TlsState::Uninitialized,
+                    cache: ThreadCache::new_const(),
+                })
+            };
         }
+    }
+}
 
-        // -- Cleanup: nightly + std --
-        #[cfg(feature = "std")]
-        mod tc_cleanup {
+// --- Thread cache cleanup ---
+
+#[cfg(all(not(feature = "percpu"), any(feature = "nightly", feature = "std")))]
+mod tc_cleanup {
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "std")] {
             struct Guard;
 
             impl Drop for Guard {
                 fn drop(&mut self) {
-                    if unsafe { super::TC.state } == super::TlsState::Active {
-                        unsafe { super::tc_destroy() };
+                    cfg_if::cfg_if! {
+                        if #[cfg(feature = "nightly")] {
+                            unsafe { super::tc_slot().destroy() };
+                        } else {
+                            let _ = super::TC_CELL.try_with(|cell| {
+                                unsafe { (*cell.get()).destroy() };
+                            });
+                        }
                     }
                 }
             }
@@ -119,22 +156,12 @@ cfg_if::cfg_if! {
             }
 
             pub(super) fn register() {
-                // Use try_with: if std's TLS is already destroyed (rare edge case
-                // during thread shutdown), silently skip — the ThreadCache leaks.
                 let _ = GUARD.try_with(|_| {});
             }
-        }
-
-        // -- Cleanup: nightly, no std --
-        #[cfg(not(feature = "std"))]
-        mod tc_cleanup {
+        } else {
+            // Nightly only, no std: #[thread_local] statics are never dropped,
+            // and without std we cannot use std::thread_local! for a Guard.
             pub(super) fn register() {}
-        }
-    } else if #[cfg(feature = "std")] {
-        std::thread_local! {
-            static TC_CELL: core::cell::UnsafeCell<ThreadCache> = const {
-                core::cell::UnsafeCell::new(ThreadCache::new_const())
-            };
         }
     }
 }
@@ -282,59 +309,63 @@ impl RtMalloc {
         } else if #[cfg(feature = "nightly")] {
             #[inline(always)]
             unsafe fn alloc_small(&self, class: usize) -> *mut u8 {
-                if unsafe { TC.state } == TlsState::Active {
-                    return unsafe {
-                        (*tc())
-                            .allocate(class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
-                    };
+                let slot = unsafe { tc_slot() };
+                match slot.state {
+                    TlsState::Active => unsafe {
+                        slot.tc().allocate(class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
+                    },
+                    TlsState::Uninitialized => unsafe {
+                        slot.init();
+                        slot.tc().allocate(class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
+                    },
+                    TlsState::Destroyed => unsafe { self.alloc_from_central(class) },
                 }
-                unsafe { self.alloc_small_slow(class) }
-            }
-
-            #[cold]
-            #[inline(never)]
-            unsafe fn alloc_small_slow(&self, class: usize) -> *mut u8 {
-                if unsafe { TC.state } == TlsState::Uninitialized {
-                    unsafe { tc_init() };
-                    return unsafe {
-                        (*tc())
-                            .allocate(class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
-                    };
-                }
-                unsafe { self.alloc_from_central(class) }
             }
 
             #[inline(always)]
             unsafe fn dealloc_small(&self, ptr: *mut u8, class: usize) {
-                if unsafe { TC.state } == TlsState::Active {
-                    unsafe {
-                        (*tc())
-                            .deallocate(ptr, class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP);
-                    }
-                    return;
+                let slot = unsafe { tc_slot() };
+                match slot.state {
+                    TlsState::Active => unsafe {
+                        slot.tc().deallocate(ptr, class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP);
+                    },
+                    _ => unsafe { self.dealloc_to_central(ptr, class) },
                 }
-                unsafe { self.dealloc_to_central(ptr, class) };
             }
         } else if #[cfg(feature = "std")] {
             #[inline(always)]
             unsafe fn alloc_small(&self, class: usize) -> *mut u8 {
                 match TC_CELL.try_with(|cell| unsafe {
-                    let tc = &mut *cell.get();
-                    tc.allocate(class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
+                    let slot = &mut *cell.get();
+                    match slot.state {
+                        TlsState::Active => {
+                            slot.tc().allocate(class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
+                        }
+                        TlsState::Uninitialized => {
+                            slot.init();
+                            slot.tc().allocate(class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP)
+                        }
+                        TlsState::Destroyed => ptr::null_mut(),
+                    }
                 }) {
-                    Ok(ptr) => ptr,
-                    Err(_) => unsafe { self.alloc_from_central(class) },
+                    Ok(ptr) if !ptr.is_null() => ptr,
+                    _ => unsafe { self.alloc_from_central(class) },
                 }
             }
 
             #[inline(always)]
             unsafe fn dealloc_small(&self, ptr: *mut u8, class: usize) {
-                if TC_CELL.try_with(|cell| unsafe {
-                    let tc = &mut *cell.get();
-                    tc.deallocate(ptr, class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP);
-                })
-                .is_err()
-                {
+                let used_tc = TC_CELL.try_with(|cell| unsafe {
+                    let slot = &mut *cell.get();
+                    match slot.state {
+                        TlsState::Active => {
+                            slot.tc().deallocate(ptr, class, &TRANSFER_CACHE, &CENTRAL_CACHE, &PAGE_HEAP, &PAGE_MAP);
+                            true
+                        }
+                        _ => false,
+                    }
+                });
+                if !matches!(used_tc, Ok(true)) {
                     unsafe { self.dealloc_to_central(ptr, class) };
                 }
             }
