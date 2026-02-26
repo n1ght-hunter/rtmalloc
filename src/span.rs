@@ -1,7 +1,7 @@
 //! Span management: metadata for contiguous runs of pages, and a slab allocator
 //! for Span structs themselves.
 
-use crate::PAGE_SIZE;
+use crate::config::PAGE_SIZE;
 use crate::platform;
 use crate::sync::SpinMutex;
 use core::ptr;
@@ -53,7 +53,7 @@ impl Span {
     /// The base address of the memory region this span covers.
     #[inline]
     pub fn start_addr(&self) -> *mut u8 {
-        (self.start_page << crate::PAGE_SHIFT) as *mut u8
+        (self.start_page << crate::config::PAGE_SHIFT) as *mut u8
     }
 
     /// Total bytes covered by this span.

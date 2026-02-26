@@ -5,6 +5,10 @@
 //! is empty or full, it batches transfers to/from the central free list.
 
 use crate::central_free_list::CentralCache;
+use crate::config::{
+    MAX_DYNAMIC_FREE_LIST_LENGTH, MAX_OVERAGES, MIN_PER_THREAD_CACHE_SIZE,
+    OVERALL_THREAD_CACHE_SIZE, STEAL_AMOUNT,
+};
 use crate::page_heap::PageHeap;
 use crate::pagemap::PageMap;
 use crate::size_class::{self, NUM_SIZE_CLASSES};
@@ -13,21 +17,6 @@ use crate::sync::SpinMutex;
 use crate::transfer_cache::TransferCacheArray;
 use core::ptr;
 use core::sync::atomic::{AtomicIsize, Ordering};
-
-/// Overall thread cache budget shared across all threads (32 MiB).
-const OVERALL_THREAD_CACHE_SIZE: usize = 32 * 1024 * 1024;
-
-/// Minimum per-thread cache size (512 KiB).
-const MIN_PER_THREAD_CACHE_SIZE: usize = 512 * 1024;
-
-/// Amount to steal from global budget during scavenge (64 KiB).
-const STEAL_AMOUNT: usize = 64 * 1024;
-
-/// Maximum dynamic free list length per size class.
-const MAX_DYNAMIC_FREE_LIST_LENGTH: u32 = 8192;
-
-/// Number of consecutive overages before shrinking max_length (gperftools: 3).
-const MAX_OVERAGES: u32 = 3;
 
 /// Unclaimed cache budget available for thread caches to claim.
 /// Starts at OVERALL_THREAD_CACHE_SIZE; each thread claims/returns portions.
@@ -181,7 +170,7 @@ impl ThreadCache {
         page_heap: &SpinMutex<PageHeap>,
         pagemap: &PageMap,
     ) {
-        for cls in 1..NUM_SIZE_CLASSES {
+        for cls in 1..size_class::NUM_SIZE_CLASSES {
             let list = &mut self.lists[cls];
             if list.length > 0 {
                 let info = size_class::class_info(cls);
@@ -214,7 +203,7 @@ impl ThreadCache {
     ///
     /// # Safety
     ///
-    /// `size_class` must be a valid index in `1..NUM_SIZE_CLASSES`.
+    /// `size_class` must be a valid index in `1..size_class::NUM_SIZE_CLASSES`.
     #[inline]
     pub unsafe fn allocate(
         &mut self,
@@ -396,7 +385,7 @@ impl ThreadCache {
         page_heap: &SpinMutex<PageHeap>,
         pagemap: &PageMap,
     ) {
-        for cls in 1..NUM_SIZE_CLASSES {
+        for cls in 1..size_class::NUM_SIZE_CLASSES {
             let list = &mut self.lists[cls];
             let lwm = list.low_water_mark;
 
@@ -455,26 +444,6 @@ impl ThreadCache {
                     return;
                 }
                 Err(_) => continue, // Retry
-            }
-        }
-    }
-}
-
-// Drop flushes cached objects back to the global caches on thread exit.
-// Gated on (nightly || std) because TRANSFER_CACHE only exists with those features.
-// Gated on not(test) because tests create ThreadCaches with local infrastructure;
-// flushing those objects to the global caches would corrupt state.
-#[cfg(all(not(test), any(feature = "nightly", feature = "std")))]
-impl Drop for ThreadCache {
-    fn drop(&mut self) {
-        if self.is_initialized() {
-            unsafe {
-                self.flush_and_destroy(
-                    &crate::allocator::TRANSFER_CACHE,
-                    &crate::allocator::CENTRAL_CACHE,
-                    &crate::allocator::PAGE_HEAP,
-                    &crate::allocator::PAGE_MAP,
-                );
             }
         }
     }

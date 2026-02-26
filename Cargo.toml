@@ -18,10 +18,16 @@ c-abi = ["ffi"]
 testing = []
 debug = ["std"]
 percpu = ["rseq/nightly", "nightly"]
+stats = []
+alloc-histogram = ["std"]
 
 [dependencies]
 cfg-if = "1"
 rseq = { path = "rseq", optional = true }
+
+[build-dependencies]
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
 
 
 [profile.fast]
