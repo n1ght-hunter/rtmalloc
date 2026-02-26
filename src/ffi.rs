@@ -122,7 +122,8 @@ pub unsafe extern "C" fn rtmalloc_realloc(
 pub mod c_abi {
     use super::ALLOC;
     use crate::allocator::PAGE_MAP;
-    use crate::{PAGE_SHIFT, PAGE_SIZE, size_class};
+    use crate::config::{PAGE_SHIFT, PAGE_SIZE};
+    use crate::size_class;
     use core::alloc::{GlobalAlloc, Layout};
 
     const MIN_ALIGN: usize = if core::mem::size_of::<usize>() >= 8 {

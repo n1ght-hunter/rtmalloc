@@ -8,15 +8,13 @@ extern crate alloc;
 
 use core::alloc::Layout;
 
-const ALIGN: usize = 8192; // Must match crate::PAGE_SIZE
-
 pub unsafe fn page_alloc(size: usize) -> *mut u8 {
-    let layout = Layout::from_size_align(size, ALIGN).unwrap();
+    let layout = Layout::from_size_align(size, crate::config::PAGE_SIZE).unwrap();
     unsafe { alloc::alloc::alloc_zeroed(layout) }
 }
 
 pub unsafe fn page_dealloc(ptr: *mut u8, size: usize) {
-    let layout = Layout::from_size_align(size, ALIGN).unwrap();
+    let layout = Layout::from_size_align(size, crate::config::PAGE_SIZE).unwrap();
     unsafe { alloc::alloc::dealloc(ptr, layout) };
 }
 

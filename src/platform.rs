@@ -94,7 +94,7 @@ pub unsafe fn page_recommit(ptr: *mut u8, size: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::PAGE_SIZE;
+    use crate::config::PAGE_SIZE;
 
     #[test]
     fn test_alloc_and_dealloc() {
