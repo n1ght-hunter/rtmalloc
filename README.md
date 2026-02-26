@@ -41,7 +41,7 @@ rtmalloc = { path = ".", features = ["nightly"] }
 
 ### Configuration
 
-All allocator tuning is done through a single TOML file. By default rtmalloc uses `default_classes.toml` in the crate root. To use a custom config, set the `RTMALLOC_CLASSES` env var at build time:
+All allocator tuning is done through a single TOML file. By default rtmalloc uses `rtmalloc.toml` in the crate root. To use a custom config, set the `RTMALLOC_CLASSES` env var at build time:
 
 ```bash
 RTMALLOC_CLASSES=my_config.toml cargo build

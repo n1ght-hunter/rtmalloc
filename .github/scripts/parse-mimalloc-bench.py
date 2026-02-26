@@ -31,8 +31,9 @@ try:
 except ImportError:
     HAS_MATPLOTLIB = False
 
-# Allocators tracked on the dashboard (rtmalloc variants only).
-TRACKED_ALLOCATORS = {"rt_nightly", "rt_std"}
+# Allocators tracked on the dashboard.
+# None means track all allocators found in the CSV.
+TRACKED_ALLOCATORS = None
 
 # Threshold for flagging changes in PR comments.
 CHANGE_THRESHOLD = 0.05  # 5%
@@ -186,7 +187,7 @@ def generate_json(groups, output_path):
     entries = []
     for bench, alloc_map in sorted(groups.items()):
         for alloc_name, row in sorted(alloc_map.items()):
-            if alloc_name not in TRACKED_ALLOCATORS:
+            if TRACKED_ALLOCATORS is not None and alloc_name not in TRACKED_ALLOCATORS:
                 continue
             entries.append({
                 "name": f"{bench}/{alloc_name}",
@@ -198,12 +199,14 @@ def generate_json(groups, output_path):
     print(f"Wrote {len(entries)} entries to {output_path}")
 
 
-def generate_bmf_json(groups, output_path):
+def generate_bmf_json(groups, output_path, base_suffix=None):
     """Generate Bencher Metric Format (BMF) JSON for bencher.dev."""
     bmf = {}
     for bench, alloc_map in sorted(groups.items()):
         for alloc_name, row in sorted(alloc_map.items()):
-            if alloc_name not in TRACKED_ALLOCATORS:
+            if TRACKED_ALLOCATORS is not None and alloc_name not in TRACKED_ALLOCATORS:
+                continue
+            if base_suffix and alloc_name.endswith(base_suffix):
                 continue
             bmf[f"{bench}/{alloc_name}"] = {"elapsed": {"value": round(row["elapsed"], 4)}}
     with open(output_path, "w") as f:
@@ -288,7 +291,7 @@ def main():
         generate_json(groups, args.output_json)
 
     if args.output_bmf:
-        generate_bmf_json(groups, args.output_bmf)
+        generate_bmf_json(groups, args.output_bmf, base_suffix=args.base_prefix)
 
     if args.output_charts:
         generate_charts(groups, args.output_charts)

@@ -1,17 +1,15 @@
 name: Benchmark Tracking
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+  push:
     branches: [main]
 
 permissions:
   contents: read
-  checks: write
+  checks: read
+  pull-requests: write
 
 jobs:
-  check-paths:
-    if: github.event.workflow_run.conclusion == 'success'
+  wait-for-ci:
     runs-on: ubuntu-latest
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
@@ -27,11 +25,19 @@ jobs:
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
           fi
+      - name: Wait for CI to pass
+        if: steps.filter.outputs.relevant == 'true'
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: check
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 15
 
   # ---- Criterion microbenchmarks ----
   criterion:
-    needs: check-paths
-    if: needs.check-paths.outputs.relevant == 'true'
+    needs: wait-for-ci
+    if: needs.wait-for-ci.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,11 +72,24 @@ jobs:
             --ci-only-on-alert \
             "cargo bench -p rtmalloc-bench --bench alloc_bench -- --noplot"
 
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Save baseline for PR comparisons
+        run: |
+          uv run .github/scripts/extract-criterion.py \
+            --head target/criterion \
+            --output-baseline baseline-criterion.json
+
+      - uses: actions/cache/save@v4
+        with:
+          path: baseline-criterion.json
+          key: baseline-criterion-${{ github.sha }}
+
 
   # ---- mimalloc-bench real-world programs ----
   mimalloc-bench:
-    needs: check-paths
-    if: needs.check-paths.outputs.relevant == 'true'
+    needs: wait-for-ci
+    if: needs.wait-for-ci.outputs.relevant == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,7 +97,7 @@ jobs:
       - run: rustup show
 
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake autoconf libtool ninja-build
+        run: sudo apt-get update && sudo apt-get install -y cmake autoconf libtool ninja-build dos2unix
 
       - uses: actions/cache@v4
         with:
@@ -90,17 +109,17 @@ jobs:
           restore-keys: bench-${{ runner.os }}-
 
       - uses: actions/cache@v4
-        id: mimalloc-bench-cache
         with:
           path: mimalloc-bench
           key: mimalloc-bench-${{ runner.os }}-v2
 
       - name: Clone and build mimalloc-bench
-        if: steps.mimalloc-bench-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 https://github.com/daanx/mimalloc-bench.git
+          if [ ! -d mimalloc-bench ]; then
+            git clone --depth 1 https://github.com/daanx/mimalloc-bench.git
+          fi
           cd mimalloc-bench
-          ./build-bench-env.sh mi tc je sn
+          ./build-bench-env.sh mi tc je sn bench
 
       - name: Build rtmalloc shared libraries
         run: |
@@ -146,3 +165,11 @@ jobs:
             --err \
             --github-actions '${{ secrets.GITHUB_TOKEN }}' \
             --ci-only-on-alert
+
+      - name: Save baseline .so for PR comparisons
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            librtmalloc_nightly.so
+            librtmalloc_std.so
+          key: baseline-rtmalloc-so-${{ github.sha }}

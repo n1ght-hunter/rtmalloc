@@ -6,15 +6,17 @@ Usage:
     # Dashboard JSON only (for bench-track.yml):
     python extract-criterion.py --head target/criterion --output-json bench-results.json
 
-    # PR comparison comment (for bench-pr.yml):
+    # Save baseline for caching (bench-track.yml):
+    python extract-criterion.py --head target/criterion --output-baseline baseline-criterion.json
+
+    # PR comparison from cached baseline (bench-pr.yml):
+    python extract-criterion.py --base-json baseline-criterion.json --head target/criterion --output-comment bench-comment.md
+
+    # PR comparison from criterion directory:
     python extract-criterion.py --base target/criterion-base --head target/criterion --output-comment bench-comment.md
 
     # Charts only:
     python extract-criterion.py --head target/criterion --output-charts bench-charts
-
-    # All outputs:
-    python extract-criterion.py --base target/criterion-base --head target/criterion \
-        --output-json bench-results.json --output-comment bench-comment.md --output-charts bench-charts
 """
 
 import argparse
@@ -553,9 +555,11 @@ def generate_charts(results, output_dir):
 def main():
     parser = argparse.ArgumentParser(description="Extract Criterion benchmark results")
     parser.add_argument("--base", help="Path to base criterion directory (for comparison)")
+    parser.add_argument("--base-json", help="Path to baseline JSON file (alternative to --base)")
     parser.add_argument("--head", required=True, help="Path to head criterion directory")
     parser.add_argument("--output-json", help="Output path for dashboard JSON (github-action-benchmark format)")
     parser.add_argument("--output-bmf", help="Output path for Bencher Metric Format JSON (bencher.dev)")
+    parser.add_argument("--output-baseline", help="Output path for baseline JSON (all results, for caching)")
     parser.add_argument("--output-comment", help="Output path for PR comparison Markdown")
     parser.add_argument("--output-charts", help="Output directory for comparison chart SVGs")
     args = parser.parse_args()
@@ -576,17 +580,27 @@ def main():
             json.dump(bmf, f, indent=2)
         print(f"Wrote {len(bmf)} BMF entries to {args.output_bmf}")
 
+    if args.output_baseline:
+        with open(args.output_baseline, "w") as f:
+            json.dump(head_results, f, indent=2)
+        print(f"Wrote {len(head_results)} baseline entries to {args.output_baseline}")
+
     if args.output_charts:
         chart_files = generate_charts(head_results, args.output_charts)
         print(f"Generated {len(chart_files)} chart files in {args.output_charts}")
 
     if args.output_comment:
-        if not args.base:
-            print("Error: --base is required when using --output-comment", file=sys.stderr)
+        if args.base:
+            base_results = scan_criterion_dir(args.base)
+            if not base_results:
+                print(f"Warning: no benchmark results found in {args.base}", file=sys.stderr)
+        elif args.base_json:
+            with open(args.base_json) as f:
+                base_results = json.load(f)
+            print(f"Loaded {len(base_results)} baseline entries from {args.base_json}")
+        else:
+            print("Error: --base or --base-json is required when using --output-comment", file=sys.stderr)
             sys.exit(1)
-        base_results = scan_criterion_dir(args.base)
-        if not base_results:
-            print(f"Warning: no benchmark results found in {args.base}", file=sys.stderr)
         comment = generate_comparison_comment(base_results, head_results)
         with open(args.output_comment, "w") as f:
             f.write(comment)

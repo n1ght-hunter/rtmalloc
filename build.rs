@@ -191,7 +191,7 @@ fn validate_classes(defs: &[ClassDef]) {
 
 fn default_config_path() -> String {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    format!("{}/default_classes.toml", manifest_dir)
+    format!("{}/rtmalloc.toml", manifest_dir)
 }
 
 fn generate_config(cfg: &ResolvedConfig, out_path: &Path) {
