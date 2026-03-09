@@ -1301,6 +1301,4 @@ fn main() {
     summary::print_summary();
     use std::io::Write;
     let _ = std::io::stdout().flush();
-
-    criterion.final_summary();
 }

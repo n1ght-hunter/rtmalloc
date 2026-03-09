@@ -1,5 +1,7 @@
 # rtmalloc: Rust Thread-caching malloc
 
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json&style=flat-square&label=CodSpeed)](https://codspeed.io/n1ght-hunter/rtmalloc?utm_source=badge)
+
 ## About
 rtmalloc is a ground up new malloc written in rust based heavily on tcmalloc. 
 The main reasons for this are:

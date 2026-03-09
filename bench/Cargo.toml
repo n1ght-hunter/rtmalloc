@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-criterion = { version = "0.8.2", features = ["html_reports"] }
+criterion = { version = "4.3.0", features = ["html_reports"], package = "codspeed-criterion-compat" }
 mimalloc = "0.1"
 snmalloc-rs = "0.3"
 rpmalloc = "0.2"
