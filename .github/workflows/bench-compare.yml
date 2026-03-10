@@ -1,0 +1,137 @@
+name: Benchmark Comparison
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: bench-compare-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  wait-for-ci:
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - id: filter
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "FORCE_RUN")
+          if echo "$CHANGED" | grep -qE '^(src/|rseq/|bench/|rtmalloc\.toml$|build\.rs$|\.github/|Cargo\.(toml|lock)$)|FORCE_RUN'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for CI to pass
+        if: steps.filter.outputs.relevant == 'true'
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: check
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 15
+
+  compare:
+    needs: wait-for-ci
+    if: needs.wait-for-ci.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: rustup show && rustup toolchain install stable --profile minimal && rustup toolchain install nightly --profile minimal
+
+      - uses: jdx/mise-action@v3
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y autoconf libtool ninja-build dos2unix
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: bench-compare-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: bench-compare-${{ runner.os }}-
+
+      # --- Criterion benchmarks (all allocators) ---
+
+      - name: Run criterion benchmarks
+        run: cargo +nightly bench -p rtmalloc-bench --bench alloc_bench -- --noplot
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Generate criterion charts
+        run: |
+          uv run .github/scripts/extract-criterion.py \
+            --head target/criterion \
+            --output-charts site/charts
+
+      # --- mimalloc-bench (all allocators via LD_PRELOAD) ---
+
+      - uses: actions/cache@v4
+        with:
+          path: mimalloc-bench
+          key: mimalloc-bench-compare-${{ runner.os }}-v1
+
+      - name: Clone and build mimalloc-bench
+        run: |
+          if [ ! -d mimalloc-bench ]; then
+            git clone --depth 1 https://github.com/daanx/mimalloc-bench.git
+          fi
+          cd mimalloc-bench
+          ./build-bench-env.sh bench mi je sn
+
+      - name: Build rtmalloc shared libraries
+        run: |
+          cargo +nightly rustc -p rtmalloc --features c-abi,nightly --crate-type cdylib --profile fast
+          cp target/fast/librtmalloc.so librtmalloc_nightly.so
+          cargo +stable rustc -p rtmalloc --features c-abi,std --crate-type cdylib --profile fast
+          cp target/fast/librtmalloc.so librtmalloc_std.so
+
+      - name: Run mimalloc-bench
+        run: |
+          cd mimalloc-bench/out/bench
+
+          REPO_ROOT="${{ github.workspace }}"
+          cat > "$REPO_ROOT/ext.txt" <<EOF
+          rt_nightly $REPO_ROOT/librtmalloc_nightly.so
+          rt_std $REPO_ROOT/librtmalloc_std.so
+          EOF
+
+          ../../bench.sh --external="$REPO_ROOT/ext.txt" mi je sn allt
+
+          cp benchres.csv "$REPO_ROOT/benchres.csv"
+
+      - name: Generate mimalloc-bench charts
+        run: |
+          uv run .github/scripts/parse-mimalloc-bench.py \
+            --csv benchres.csv \
+            --output-charts site/mimalloc-bench
+
+      # --- Deploy to gh-pages ---
+      # Deploys criterion charts to dev/charts/ and mimalloc-bench charts to dev/mimalloc-bench/.
+      # Uses destination_dir=dev so other top-level gh-pages content (index.html, etc.) is preserved.
+
+      - name: Prepare deploy directory
+        run: |
+          mkdir -p deploy
+          mv site/charts deploy/charts
+          mv site/mimalloc-bench deploy/mimalloc-bench
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./deploy
+          destination_dir: dev
+          keep_files: true

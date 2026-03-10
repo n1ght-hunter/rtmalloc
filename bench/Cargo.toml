@@ -4,14 +4,24 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[features]
+default = ["mimalloc", "snmalloc", "rpmalloc", "jemalloc"]
+mimalloc = ["dep:mimalloc"]
+snmalloc = ["dep:snmalloc-rs"]
+rpmalloc = ["dep:rpmalloc"]
+jemalloc = ["dep:tikv-jemallocator"]
+# Excludes rseq-based percpu variant which is incompatible with valgrind/callgrind.
+# Use with --no-default-features for CodSpeed simulation (rtmalloc-only regression tracking).
+callgrind = []
+
 [dependencies]
-criterion = { version = "0.8.2", features = ["html_reports"] }
-mimalloc = "0.1"
-snmalloc-rs = "0.3"
-rpmalloc = "0.2"
+criterion = { version = "4.3.0", features = ["html_reports"], package = "codspeed-criterion-compat" }
+mimalloc = { version = "0.1", optional = true }
+snmalloc-rs = { version = "0.3", optional = true }
+rpmalloc = { version = "0.2", optional = true }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.6"
+tikv-jemallocator = { version = "0.6", optional = true }
 
 [[bench]]
 name = "alloc_bench"

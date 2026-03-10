@@ -2,7 +2,7 @@
 //!
 //! Objects are bucketed into size classes to reduce fragmentation and enable
 //! free list management. The table is configured via a TOML file at build time
-//! (see `default_classes.toml` and the `RTMALLOC_CLASSES` env var).
+//! (see `rtmalloc.toml` and the `RTMALLOC_CLASSES` env var).
 
 use crate::config::PAGE_SIZE;
 

@@ -1,0 +1,3 @@
+[tools]
+cmake = "latest"
+"github:CodSpeedHQ/codspeed-rust" = "v4.3.0"
