@@ -1,0 +1,163 @@
+name: Benchmarks
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: bench-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  wait-for-ci:
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "FORCE_RUN")
+          else
+            CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "FORCE_RUN")
+          fi
+          if echo "$CHANGED" | grep -qE '^(src/|rseq/|bench/|rtmalloc\.toml$|build\.rs$|\.github/|Cargo\.(toml|lock)$)|FORCE_RUN'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for CI to pass
+        if: steps.filter.outputs.relevant == 'true'
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          check-name: check
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 15
+
+  criterion:
+    needs: wait-for-ci
+    if: needs.wait-for-ci.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: rustup show
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: codspeed-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: codspeed-${{ runner.os }}-
+
+      - uses: jdx/mise-action@v3
+
+      - name: Build benchmarks for CodSpeed
+        run: cargo codspeed build -p rtmalloc-bench --no-default-features --features callgrind
+
+      - name: Run benchmarks with CodSpeed
+        uses: CodSpeedHQ/action@v4
+        with:
+          mode: simulation
+          run: cargo codspeed run -p rtmalloc-bench
+
+  mimalloc-bench:
+    needs: wait-for-ci
+    if: needs.wait-for-ci.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: rustup show && rustup toolchain install stable --profile minimal && rustup toolchain install nightly --profile minimal
+
+      - uses: jdx/mise-action@v3
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y autoconf libtool ninja-build dos2unix
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: codspeed-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: codspeed-${{ runner.os }}-
+
+      - uses: actions/cache@v4
+        with:
+          path: mimalloc-bench
+          key: mimalloc-bench-${{ runner.os }}-v2
+
+      - name: Clone and build mimalloc-bench
+        run: |
+          if [ ! -d mimalloc-bench ]; then
+            git clone --depth 1 https://github.com/daanx/mimalloc-bench.git
+          fi
+          cd mimalloc-bench
+          ./build-bench-env.sh bench
+
+      - name: Build rtmalloc shared libraries
+        run: |
+          cargo +nightly rustc -p rtmalloc --features c-abi,nightly --crate-type cdylib --profile fast
+          cp target/fast/librtmalloc.so librtmalloc_nightly.so
+          cargo +stable rustc -p rtmalloc --features c-abi,std --crate-type cdylib --profile fast
+          cp target/fast/librtmalloc.so librtmalloc_std.so
+
+      - name: Generate codspeed.yml
+        run: |
+          ALLOC_NIGHTLY=${{ github.workspace }}/librtmalloc_nightly.so
+          ALLOC_STD=${{ github.workspace }}/librtmalloc_std.so
+          BENCH=${{ github.workspace }}/mimalloc-bench/out/bench
+          BENCHDIR=${{ github.workspace }}/mimalloc-bench/bench
+
+          # Map benchmark names to their full command lines
+          declare -A BENCH_CMDS
+          BENCH_CMDS[cfrac]="$BENCH/cfrac 17545186520507317056371138836327483792789528"
+          BENCH_CMDS[espresso]="$BENCH/espresso $BENCHDIR/espresso/largest.espresso"
+          # barnes reads from stdin; CodSpeed simulation can't handle sh -c subprocesses,
+          # so we skip it here (it works in walltime mode)
+          # BENCH_CMDS[barnes]="sh -c '$BENCH/barnes < $BENCHDIR/barnes/input'"
+          BENCH_CMDS[leanN]="$BENCH/leanN"
+          BENCH_CMDS[larsonN]="$BENCH/larsonN"
+          BENCH_CMDS[mstressN]="$BENCH/mstressN"
+          BENCH_CMDS[sh6benchN]="$BENCH/sh6benchN"
+          BENCH_CMDS[sh8benchN]="$BENCH/sh8benchN"
+          BENCH_CMDS[xmalloc-testN]="$BENCH/xmalloc-testN"
+
+          echo "benchmarks:" > codspeed.yml
+          for bench in cfrac espresso leanN larsonN mstressN sh6benchN sh8benchN xmalloc-testN; do
+            CMD="${BENCH_CMDS[$bench]}"
+            if [ -f "$BENCH/$bench" ] && [ -n "$CMD" ]; then
+              cat >> codspeed.yml <<ENTRY
+            - name: "${bench}/rt_nightly"
+              exec: "env LD_PRELOAD=$ALLOC_NIGHTLY $CMD"
+            - name: "${bench}/rt_std"
+              exec: "env LD_PRELOAD=$ALLOC_STD $CMD"
+          ENTRY
+            fi
+          done
+          echo "Generated codspeed.yml:"
+          cat codspeed.yml
+
+      - name: Run mimalloc-bench with CodSpeed
+        uses: CodSpeedHQ/action@v4
+        with:
+          mode: simulation

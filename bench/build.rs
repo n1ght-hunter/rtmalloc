@@ -6,7 +6,7 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(has_rtmalloc_percpu)");
     println!("cargo::rustc-check-cfg=cfg(has_jemalloc)");
 
-    // jemalloc is available on non-MSVC targets (Cargo.toml uses target cfg)
+    // jemalloc is only available on non-MSVC targets
     #[cfg(not(target_env = "msvc"))]
     println!("cargo:rustc-cfg=has_jemalloc");
 

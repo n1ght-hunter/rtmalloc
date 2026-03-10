@@ -5,15 +5,19 @@
 //!
 //! rtmalloc is linked as a staticlib (built with --profile fast by build.rs).
 //! After criterion finishes, a colored comparison table is printed.
+#![allow(unexpected_cfgs)]
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
 
+#[cfg(feature = "mimalloc")]
 use mimalloc::MiMalloc;
+#[cfg(feature = "rpmalloc")]
 use rpmalloc::RpMalloc;
+#[cfg(feature = "snmalloc")]
 use snmalloc_rs::SnMalloc;
-#[cfg(has_jemalloc)]
+#[cfg(all(has_jemalloc, feature = "jemalloc"))]
 use tikv_jemallocator::Jemalloc;
 
 // ---------------------------------------------------------------------------
@@ -56,7 +60,7 @@ mod rtmalloc_ffi {
     }
 
     // Per-CPU variant (rseq, Linux x86_64 only)
-    #[cfg(has_rtmalloc_percpu)]
+    #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
     unsafe extern "C" {
         fn rtmalloc_percpu_alloc(size: usize, align: usize) -> *mut u8;
         fn rtmalloc_percpu_dealloc(ptr: *mut u8, size: usize, align: usize);
@@ -107,7 +111,7 @@ mod rtmalloc_ffi {
         rtmalloc_nostd_dealloc,
         rtmalloc_nostd_realloc
     );
-    #[cfg(has_rtmalloc_percpu)]
+    #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
     impl_ffi_alloc!(
         RtmallocPercpu,
         rtmalloc_percpu_alloc,
@@ -116,7 +120,7 @@ mod rtmalloc_ffi {
     );
 }
 
-#[cfg(has_rtmalloc_percpu)]
+#[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
 use rtmalloc_ffi::RtmallocPercpu;
 use rtmalloc_ffi::{RtmallocNightly, RtmallocNostd, RtmallocStd};
 
@@ -169,12 +173,15 @@ use google_tc::GoogleTcMalloc;
 static RTMALLOC_NIGHTLY: RtmallocNightly = RtmallocNightly;
 static RTMALLOC_STD: RtmallocStd = RtmallocStd;
 static RTMALLOC_NOSTD: RtmallocNostd = RtmallocNostd;
-#[cfg(has_rtmalloc_percpu)]
+#[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
 static RTMALLOC_PERCPU: RtmallocPercpu = RtmallocPercpu;
+#[cfg(feature = "mimalloc")]
 static MIMALLOC: MiMalloc = MiMalloc;
+#[cfg(feature = "snmalloc")]
 static SNMALLOC: SnMalloc = SnMalloc;
+#[cfg(feature = "rpmalloc")]
 static RPMALLOC: RpMalloc = RpMalloc;
-#[cfg(has_jemalloc)]
+#[cfg(all(has_jemalloc, feature = "jemalloc"))]
 static JEMALLOC: Jemalloc = Jemalloc;
 #[cfg(has_google_tcmalloc)]
 static GOOGLE_TC: GoogleTcMalloc = GoogleTcMalloc;
@@ -234,7 +241,6 @@ unsafe fn churn(allocator: &dyn GlobalAlloc, layout: Layout, rounds: usize) {
 fn bench_single_alloc_dealloc(c: &mut Criterion) {
     let sizes: &[usize] = &[8, 64, 256, 1024, 4096, 65536];
     let mut group = c.benchmark_group("single_alloc_dealloc");
-    group.sample_size(50);
 
     for &size in sizes {
         let layout = Layout::from_size_align(size, 8).unwrap();
@@ -246,7 +252,7 @@ fn bench_single_alloc_dealloc(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("rt_nightly", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&RTMALLOC_NIGHTLY, layout) })
         });
-        #[cfg(has_rtmalloc_percpu)]
+        #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
         group.bench_with_input(BenchmarkId::new("rt_percpu", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&RTMALLOC_PERCPU, layout) })
         });
@@ -256,6 +262,7 @@ fn bench_single_alloc_dealloc(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("rt_nostd", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&RTMALLOC_NOSTD, layout) })
         });
+        #[cfg(feature = "mimalloc")]
         group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&MIMALLOC, layout) })
         });
@@ -263,13 +270,15 @@ fn bench_single_alloc_dealloc(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("google_tc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&GOOGLE_TC, layout) })
         });
+        #[cfg(feature = "snmalloc")]
         group.bench_with_input(BenchmarkId::new("snmalloc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&SNMALLOC, layout) })
         });
+        #[cfg(feature = "rpmalloc")]
         group.bench_with_input(BenchmarkId::new("rpmalloc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&RPMALLOC, layout) })
         });
-        #[cfg(has_jemalloc)]
+        #[cfg(all(has_jemalloc, feature = "jemalloc"))]
         group.bench_with_input(BenchmarkId::new("jemalloc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&JEMALLOC, layout) })
         });
@@ -279,9 +288,8 @@ fn bench_single_alloc_dealloc(c: &mut Criterion) {
 
 fn bench_batch_alloc_free(c: &mut Criterion) {
     let sizes: &[usize] = &[8, 64, 512, 4096];
-    let n = 1000;
-    let mut group = c.benchmark_group("batch_1000");
-    group.sample_size(30);
+    let n = 5000;
+    let mut group = c.benchmark_group("batch_5000");
 
     for &size in sizes {
         let layout = Layout::from_size_align(size, 8).unwrap();
@@ -293,7 +301,7 @@ fn bench_batch_alloc_free(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("rt_nightly", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&RTMALLOC_NIGHTLY, layout, n) })
         });
-        #[cfg(has_rtmalloc_percpu)]
+        #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
         group.bench_with_input(BenchmarkId::new("rt_percpu", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&RTMALLOC_PERCPU, layout, n) })
         });
@@ -303,6 +311,7 @@ fn bench_batch_alloc_free(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("rt_nostd", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&RTMALLOC_NOSTD, layout, n) })
         });
+        #[cfg(feature = "mimalloc")]
         group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&MIMALLOC, layout, n) })
         });
@@ -310,13 +319,15 @@ fn bench_batch_alloc_free(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("google_tc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&GOOGLE_TC, layout, n) })
         });
+        #[cfg(feature = "snmalloc")]
         group.bench_with_input(BenchmarkId::new("snmalloc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&SNMALLOC, layout, n) })
         });
+        #[cfg(feature = "rpmalloc")]
         group.bench_with_input(BenchmarkId::new("rpmalloc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&RPMALLOC, layout, n) })
         });
-        #[cfg(has_jemalloc)]
+        #[cfg(all(has_jemalloc, feature = "jemalloc"))]
         group.bench_with_input(BenchmarkId::new("jemalloc", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&JEMALLOC, layout, n) })
         });
@@ -326,9 +337,8 @@ fn bench_batch_alloc_free(c: &mut Criterion) {
 
 fn bench_churn(c: &mut Criterion) {
     let sizes: &[usize] = &[32, 256, 2048];
-    let rounds = 200;
+    let rounds = 1000;
     let mut group = c.benchmark_group("churn");
-    group.sample_size(30);
 
     for &size in sizes {
         let layout = Layout::from_size_align(size, 8).unwrap();
@@ -340,7 +350,7 @@ fn bench_churn(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("rt_nightly", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&RTMALLOC_NIGHTLY, layout, rounds) })
         });
-        #[cfg(has_rtmalloc_percpu)]
+        #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
         group.bench_with_input(BenchmarkId::new("rt_percpu", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&RTMALLOC_PERCPU, layout, rounds) })
         });
@@ -350,6 +360,7 @@ fn bench_churn(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("rt_nostd", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&RTMALLOC_NOSTD, layout, rounds) })
         });
+        #[cfg(feature = "mimalloc")]
         group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&MIMALLOC, layout, rounds) })
         });
@@ -357,13 +368,15 @@ fn bench_churn(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("google_tc", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&GOOGLE_TC, layout, rounds) })
         });
+        #[cfg(feature = "snmalloc")]
         group.bench_with_input(BenchmarkId::new("snmalloc", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&SNMALLOC, layout, rounds) })
         });
+        #[cfg(feature = "rpmalloc")]
         group.bench_with_input(BenchmarkId::new("rpmalloc", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&RPMALLOC, layout, rounds) })
         });
-        #[cfg(has_jemalloc)]
+        #[cfg(all(has_jemalloc, feature = "jemalloc"))]
         group.bench_with_input(BenchmarkId::new("jemalloc", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&JEMALLOC, layout, rounds) })
         });
@@ -373,9 +386,8 @@ fn bench_churn(c: &mut Criterion) {
 
 fn bench_vec_push(c: &mut Criterion) {
     let mut group = c.benchmark_group("vec_growth");
-    let final_len: usize = 10_000;
+    let final_len: usize = 50_000;
     group.throughput(Throughput::Elements(final_len as u64));
-    group.sample_size(50);
 
     fn simulate_vec_growth(allocator: &dyn GlobalAlloc, n: usize) {
         let elem = std::mem::size_of::<u64>();
@@ -406,7 +418,7 @@ fn bench_vec_push(c: &mut Criterion) {
     group.bench_function("rt_nightly", |b| {
         b.iter(|| simulate_vec_growth(&RTMALLOC_NIGHTLY, black_box(final_len)))
     });
-    #[cfg(has_rtmalloc_percpu)]
+    #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
     group.bench_function("rt_percpu", |b| {
         b.iter(|| simulate_vec_growth(&RTMALLOC_PERCPU, black_box(final_len)))
     });
@@ -416,6 +428,7 @@ fn bench_vec_push(c: &mut Criterion) {
     group.bench_function("rt_nostd", |b| {
         b.iter(|| simulate_vec_growth(&RTMALLOC_NOSTD, black_box(final_len)))
     });
+    #[cfg(feature = "mimalloc")]
     group.bench_function("mimalloc", |b| {
         b.iter(|| simulate_vec_growth(&MIMALLOC, black_box(final_len)))
     });
@@ -423,13 +436,15 @@ fn bench_vec_push(c: &mut Criterion) {
     group.bench_function("google_tc", |b| {
         b.iter(|| simulate_vec_growth(&GOOGLE_TC, black_box(final_len)))
     });
+    #[cfg(feature = "snmalloc")]
     group.bench_function("snmalloc", |b| {
         b.iter(|| simulate_vec_growth(&SNMALLOC, black_box(final_len)))
     });
+    #[cfg(feature = "rpmalloc")]
     group.bench_function("rpmalloc", |b| {
         b.iter(|| simulate_vec_growth(&RPMALLOC, black_box(final_len)))
     });
-    #[cfg(has_jemalloc)]
+    #[cfg(all(has_jemalloc, feature = "jemalloc"))]
     group.bench_function("jemalloc", |b| {
         b.iter(|| simulate_vec_growth(&JEMALLOC, black_box(final_len)))
     });
@@ -439,10 +454,9 @@ fn bench_vec_push(c: &mut Criterion) {
 
 fn bench_multithreaded(c: &mut Criterion) {
     let mut group = c.benchmark_group("multithread_4t");
-    let ops_per_thread = 5000usize;
+    let ops_per_thread = 20_000usize;
     let nthreads = 4;
     group.throughput(Throughput::Elements((ops_per_thread * nthreads) as u64));
-    group.sample_size(20);
 
     fn mt_workload<A: GlobalAlloc + Sync>(allocator: &'static A, nthreads: usize, ops: usize) {
         let layout = Layout::from_size_align(64, 8).unwrap();
@@ -480,7 +494,8 @@ fn bench_multithreaded(c: &mut Criterion) {
     group.bench_function("rt_nightly", |b| {
         b.iter(|| mt_workload(&RTMALLOC_NIGHTLY, nthreads, ops_per_thread))
     });
-    #[cfg(has_rtmalloc_percpu)]
+    // rt_percpu uses rseq (restartable sequences) which valgrind cannot emulate
+    #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
     group.bench_function("rt_percpu", |b| {
         b.iter(|| mt_workload(&RTMALLOC_PERCPU, nthreads, ops_per_thread))
     });
@@ -490,6 +505,7 @@ fn bench_multithreaded(c: &mut Criterion) {
     group.bench_function("rt_nostd", |b| {
         b.iter(|| mt_workload(&RTMALLOC_NOSTD, nthreads, ops_per_thread))
     });
+    #[cfg(feature = "mimalloc")]
     group.bench_function("mimalloc", |b| {
         b.iter(|| mt_workload(&MIMALLOC, nthreads, ops_per_thread))
     });
@@ -497,13 +513,15 @@ fn bench_multithreaded(c: &mut Criterion) {
     group.bench_function("google_tc", |b| {
         b.iter(|| mt_workload(&GOOGLE_TC, nthreads, ops_per_thread))
     });
+    #[cfg(feature = "snmalloc")]
     group.bench_function("snmalloc", |b| {
         b.iter(|| mt_workload(&SNMALLOC, nthreads, ops_per_thread))
     });
+    #[cfg(feature = "rpmalloc")]
     group.bench_function("rpmalloc", |b| {
         b.iter(|| mt_workload(&RPMALLOC, nthreads, ops_per_thread))
     });
-    #[cfg(has_jemalloc)]
+    #[cfg(all(has_jemalloc, feature = "jemalloc"))]
     group.bench_function("jemalloc", |b| {
         b.iter(|| mt_workload(&JEMALLOC, nthreads, ops_per_thread))
     });
@@ -517,10 +535,9 @@ fn bench_multithreaded(c: &mut Criterion) {
 
 fn bench_cross_thread_free(c: &mut Criterion) {
     let mut group = c.benchmark_group("cross_thread_free");
-    let ops = 2000usize;
+    let ops = 10_000usize;
     let nthreads = 4;
     group.throughput(Throughput::Elements((ops * nthreads) as u64));
-    group.sample_size(20);
 
     /// Allocate objects on producer threads, send them to consumer threads for
     /// deallocation. This is the core pattern that stresses thread caches —
@@ -573,7 +590,7 @@ fn bench_cross_thread_free(c: &mut Criterion) {
     group.bench_function("rt_nightly", |b| {
         b.iter(|| cross_thread_workload(&RTMALLOC_NIGHTLY, nthreads, ops))
     });
-    #[cfg(has_rtmalloc_percpu)]
+    #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
     group.bench_function("rt_percpu", |b| {
         b.iter(|| cross_thread_workload(&RTMALLOC_PERCPU, nthreads, ops))
     });
@@ -583,6 +600,7 @@ fn bench_cross_thread_free(c: &mut Criterion) {
     group.bench_function("rt_nostd", |b| {
         b.iter(|| cross_thread_workload(&RTMALLOC_NOSTD, nthreads, ops))
     });
+    #[cfg(feature = "mimalloc")]
     group.bench_function("mimalloc", |b| {
         b.iter(|| cross_thread_workload(&MIMALLOC, nthreads, ops))
     });
@@ -590,13 +608,15 @@ fn bench_cross_thread_free(c: &mut Criterion) {
     group.bench_function("google_tc", |b| {
         b.iter(|| cross_thread_workload(&GOOGLE_TC, nthreads, ops))
     });
+    #[cfg(feature = "snmalloc")]
     group.bench_function("snmalloc", |b| {
         b.iter(|| cross_thread_workload(&SNMALLOC, nthreads, ops))
     });
+    #[cfg(feature = "rpmalloc")]
     group.bench_function("rpmalloc", |b| {
         b.iter(|| cross_thread_workload(&RPMALLOC, nthreads, ops))
     });
-    #[cfg(has_jemalloc)]
+    #[cfg(all(has_jemalloc, feature = "jemalloc"))]
     group.bench_function("jemalloc", |b| {
         b.iter(|| cross_thread_workload(&JEMALLOC, nthreads, ops))
     });
@@ -610,8 +630,7 @@ fn bench_cross_thread_free(c: &mut Criterion) {
 
 fn bench_thread_scalability(c: &mut Criterion) {
     let mut group = c.benchmark_group("thread_scalability");
-    let ops_per_thread = 3000usize;
-    group.sample_size(15);
+    let ops_per_thread = 10_000usize;
 
     fn scale_workload<A: GlobalAlloc + Sync>(allocator: &'static A, nthreads: usize, ops: usize) {
         let layout = Layout::from_size_align(64, 8).unwrap();
@@ -654,7 +673,7 @@ fn bench_thread_scalability(c: &mut Criterion) {
             &nthreads,
             |b, &nt| b.iter(|| scale_workload(&RTMALLOC_NIGHTLY, nt, ops_per_thread)),
         );
-        #[cfg(has_rtmalloc_percpu)]
+        #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
         group.bench_with_input(
             BenchmarkId::new("rt_percpu", nthreads),
             &nthreads,
@@ -668,6 +687,7 @@ fn bench_thread_scalability(c: &mut Criterion) {
             &nthreads,
             |b, &nt| b.iter(|| scale_workload(&RTMALLOC_NOSTD, nt, ops_per_thread)),
         );
+        #[cfg(feature = "mimalloc")]
         group.bench_with_input(
             BenchmarkId::new("mimalloc", nthreads),
             &nthreads,
@@ -679,17 +699,19 @@ fn bench_thread_scalability(c: &mut Criterion) {
             &nthreads,
             |b, &nt| b.iter(|| scale_workload(&GOOGLE_TC, nt, ops_per_thread)),
         );
+        #[cfg(feature = "snmalloc")]
         group.bench_with_input(
             BenchmarkId::new("snmalloc", nthreads),
             &nthreads,
             |b, &nt| b.iter(|| scale_workload(&SNMALLOC, nt, ops_per_thread)),
         );
+        #[cfg(feature = "rpmalloc")]
         group.bench_with_input(
             BenchmarkId::new("rpmalloc", nthreads),
             &nthreads,
             |b, &nt| b.iter(|| scale_workload(&RPMALLOC, nt, ops_per_thread)),
         );
-        #[cfg(has_jemalloc)]
+        #[cfg(all(has_jemalloc, feature = "jemalloc"))]
         group.bench_with_input(
             BenchmarkId::new("jemalloc", nthreads),
             &nthreads,
@@ -706,9 +728,8 @@ fn bench_thread_scalability(c: &mut Criterion) {
 
 fn bench_mixed_sizes(c: &mut Criterion) {
     let mut group = c.benchmark_group("mixed_sizes");
-    let n = 2000usize;
+    let n = 10_000usize;
     group.throughput(Throughput::Elements(n as u64));
-    group.sample_size(30);
 
     /// Mimalloc-style size distribution: linearly distributed in powers-of-2
     /// buckets, with 1% large objects (100x base) and 0.1% huge objects (1000x).
@@ -762,7 +783,7 @@ fn bench_mixed_sizes(c: &mut Criterion) {
     group.bench_function("rt_nightly", |b| {
         b.iter(|| mixed_workload(&RTMALLOC_NIGHTLY, black_box(n)))
     });
-    #[cfg(has_rtmalloc_percpu)]
+    #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
     group.bench_function("rt_percpu", |b| {
         b.iter(|| mixed_workload(&RTMALLOC_PERCPU, black_box(n)))
     });
@@ -772,6 +793,7 @@ fn bench_mixed_sizes(c: &mut Criterion) {
     group.bench_function("rt_nostd", |b| {
         b.iter(|| mixed_workload(&RTMALLOC_NOSTD, black_box(n)))
     });
+    #[cfg(feature = "mimalloc")]
     group.bench_function("mimalloc", |b| {
         b.iter(|| mixed_workload(&MIMALLOC, black_box(n)))
     });
@@ -779,13 +801,15 @@ fn bench_mixed_sizes(c: &mut Criterion) {
     group.bench_function("google_tc", |b| {
         b.iter(|| mixed_workload(&GOOGLE_TC, black_box(n)))
     });
+    #[cfg(feature = "snmalloc")]
     group.bench_function("snmalloc", |b| {
         b.iter(|| mixed_workload(&SNMALLOC, black_box(n)))
     });
+    #[cfg(feature = "rpmalloc")]
     group.bench_function("rpmalloc", |b| {
         b.iter(|| mixed_workload(&RPMALLOC, black_box(n)))
     });
-    #[cfg(has_jemalloc)]
+    #[cfg(all(has_jemalloc, feature = "jemalloc"))]
     group.bench_function("jemalloc", |b| {
         b.iter(|| mixed_workload(&JEMALLOC, black_box(n)))
     });
@@ -799,10 +823,9 @@ fn bench_mixed_sizes(c: &mut Criterion) {
 
 fn bench_producer_consumer(c: &mut Criterion) {
     let mut group = c.benchmark_group("producer_consumer");
-    let ops_per_producer = 2000usize;
+    let ops_per_producer = 10_000usize;
     let npairs = 4;
     group.throughput(Throughput::Elements((ops_per_producer * npairs) as u64));
-    group.sample_size(15);
 
     /// Asymmetric workload: producer threads only allocate and send pointers
     /// through a channel; consumer threads only receive and free. This is the
@@ -852,7 +875,7 @@ fn bench_producer_consumer(c: &mut Criterion) {
     group.bench_function("rt_nightly", |b| {
         b.iter(|| pc_workload(&RTMALLOC_NIGHTLY, npairs, ops_per_producer))
     });
-    #[cfg(has_rtmalloc_percpu)]
+    #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
     group.bench_function("rt_percpu", |b| {
         b.iter(|| pc_workload(&RTMALLOC_PERCPU, npairs, ops_per_producer))
     });
@@ -862,6 +885,7 @@ fn bench_producer_consumer(c: &mut Criterion) {
     group.bench_function("rt_nostd", |b| {
         b.iter(|| pc_workload(&RTMALLOC_NOSTD, npairs, ops_per_producer))
     });
+    #[cfg(feature = "mimalloc")]
     group.bench_function("mimalloc", |b| {
         b.iter(|| pc_workload(&MIMALLOC, npairs, ops_per_producer))
     });
@@ -869,13 +893,15 @@ fn bench_producer_consumer(c: &mut Criterion) {
     group.bench_function("google_tc", |b| {
         b.iter(|| pc_workload(&GOOGLE_TC, npairs, ops_per_producer))
     });
+    #[cfg(feature = "snmalloc")]
     group.bench_function("snmalloc", |b| {
         b.iter(|| pc_workload(&SNMALLOC, npairs, ops_per_producer))
     });
+    #[cfg(feature = "rpmalloc")]
     group.bench_function("rpmalloc", |b| {
         b.iter(|| pc_workload(&RPMALLOC, npairs, ops_per_producer))
     });
-    #[cfg(has_jemalloc)]
+    #[cfg(all(has_jemalloc, feature = "jemalloc"))]
     group.bench_function("jemalloc", |b| {
         b.iter(|| pc_workload(&JEMALLOC, npairs, ops_per_producer))
     });
@@ -1283,7 +1309,38 @@ mod summary {
 
 fn main() {
     // Run criterion benchmarks (respects CLI args like --bench, filters, etc.)
-    let mut criterion = Criterion::default().configure_from_args();
+    let sample_size: usize = std::env::var("BENCH_SAMPLE_SIZE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
+    let warmup_secs: u64 = std::env::var("BENCH_WARMUP_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    let measure_secs: u64 = std::env::var("BENCH_MEASURE_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2);
+
+    #[allow(unused_mut)]
+    let mut criterion = Criterion::default()
+        .sample_size(sample_size)
+        .warm_up_time(std::time::Duration::from_secs(warmup_secs))
+        .measurement_time(std::time::Duration::from_secs(measure_secs))
+        .configure_from_args();
+    // codspeed-criterion-compat's Criterion::default() sets codspeed to None.
+    // We need new_instrumented() for CodSpeed to work, but keep default() for
+    // local runs. Patch the codspeed field when running under codspeed.
+    #[cfg(codspeed)]
+    let mut criterion = {
+        let mut c = Criterion::new_instrumented();
+        c = c
+            .sample_size(sample_size)
+            .warm_up_time(std::time::Duration::from_secs(warmup_secs))
+            .measurement_time(std::time::Duration::from_secs(measure_secs))
+            .configure_from_args();
+        c
+    };
     bench_single_alloc_dealloc(&mut criterion);
     bench_batch_alloc_free(&mut criterion);
     bench_churn(&mut criterion);
