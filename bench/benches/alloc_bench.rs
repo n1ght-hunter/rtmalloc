@@ -13,6 +13,47 @@ use std::alloc::{GlobalAlloc, Layout};
 use std::hint::black_box;
 
 // ---------------------------------------------------------------------------
+// Hot-path helpers (kept in bench file for optimal codegen under callgrind)
+// ---------------------------------------------------------------------------
+
+unsafe fn alloc_dealloc(allocator: &dyn GlobalAlloc, layout: Layout) {
+    let ptr = unsafe { allocator.alloc(layout) };
+    assert!(!ptr.is_null());
+    unsafe { allocator.dealloc(ptr, layout) };
+}
+
+unsafe fn alloc_n_then_free(allocator: &dyn GlobalAlloc, layout: Layout, n: usize) {
+    let mut ptrs = Vec::with_capacity(n);
+    for _ in 0..n {
+        let ptr = unsafe { allocator.alloc(layout) };
+        assert!(!ptr.is_null());
+        ptrs.push(ptr);
+    }
+    for ptr in ptrs.into_iter().rev() {
+        unsafe { allocator.dealloc(ptr, layout) };
+    }
+}
+
+unsafe fn churn(allocator: &dyn GlobalAlloc, layout: Layout, rounds: usize) {
+    let mut live: Vec<*mut u8> = Vec::new();
+    for _ in 0..rounds {
+        for _ in 0..10 {
+            let ptr = unsafe { allocator.alloc(layout) };
+            assert!(!ptr.is_null());
+            live.push(ptr);
+        }
+        let drain = live.len() / 2;
+        for _ in 0..drain {
+            let ptr = live.pop().unwrap();
+            unsafe { allocator.dealloc(ptr, layout) };
+        }
+    }
+    for ptr in live {
+        unsafe { allocator.dealloc(ptr, layout) };
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Benchmarks
 // ---------------------------------------------------------------------------
 
@@ -23,7 +64,7 @@ fn bench_single_alloc_dealloc(c: &mut Criterion) {
     for &size in sizes {
         let layout = Layout::from_size_align(size, 8).unwrap();
         group.throughput(Throughput::Elements(1));
-        bench_all_allocators_param!(group, size, |b, alloc: &dyn GlobalAlloc| {
+        bench_all_allocators_param!(group, size, |b, alloc| {
             b.iter(|| unsafe { alloc_dealloc(alloc, layout) })
         });
     }
@@ -38,7 +79,7 @@ fn bench_batch_alloc_free(c: &mut Criterion) {
     for &size in sizes {
         let layout = Layout::from_size_align(size, 8).unwrap();
         group.throughput(Throughput::Elements(n as u64));
-        bench_all_allocators_param!(group, size, |b, alloc: &dyn GlobalAlloc| {
+        bench_all_allocators_param!(group, size, |b, alloc| {
             b.iter(|| unsafe { alloc_n_then_free(alloc, layout, n) })
         });
     }
@@ -53,7 +94,7 @@ fn bench_churn(c: &mut Criterion) {
     for &size in sizes {
         let layout = Layout::from_size_align(size, 8).unwrap();
         group.throughput(Throughput::Elements(rounds as u64 * 10));
-        bench_all_allocators_param!(group, size, |b, alloc: &dyn GlobalAlloc| {
+        bench_all_allocators_param!(group, size, |b, alloc| {
             b.iter(|| unsafe { churn(alloc, layout, rounds) })
         });
     }
@@ -88,7 +129,7 @@ fn bench_vec_push(c: &mut Criterion) {
         unsafe { allocator.dealloc(ptr, layout) };
     }
 
-    bench_all_allocators!(group, "", |b, alloc: &dyn GlobalAlloc| {
+    bench_all_allocators!(group, "", |b, alloc| {
         b.iter(|| simulate_vec_growth(alloc, black_box(final_len)))
     });
 
@@ -285,7 +326,7 @@ fn bench_mixed_sizes(c: &mut Criterion) {
         }
     }
 
-    bench_all_allocators!(group, "", |b, alloc: &dyn GlobalAlloc| {
+    bench_all_allocators!(group, "", |b, alloc| {
         b.iter(|| mixed_workload(alloc, black_box(n)))
     });
 
@@ -413,7 +454,7 @@ fn bench_large_alloc(c: &mut Criterion) {
             format!("{}KB", size / 1024)
         };
         group.throughput(Throughput::Elements(1));
-        bench_all_allocators_param!(group, &label, |b, alloc: &dyn GlobalAlloc| {
+        bench_all_allocators_param!(group, &label, |b, alloc| {
             b.iter(|| unsafe { alloc_dealloc(alloc, layout) })
         });
     }
@@ -432,7 +473,7 @@ fn bench_aligned_alloc(c: &mut Criterion) {
 
     for &(align, label) in aligns {
         let layout = Layout::from_size_align(size, align).unwrap();
-        bench_all_allocators!(group, format!("/{label}"), |b, alloc: &dyn GlobalAlloc| {
+        bench_all_allocators!(group, format!("/{label}"), |b, alloc| {
             b.iter(|| unsafe { alloc_dealloc(alloc, layout) })
         });
     }

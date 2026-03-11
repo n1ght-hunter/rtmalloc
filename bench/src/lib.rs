@@ -4,7 +4,7 @@
 //! recolor module used by the benchmark harness.
 #![allow(unexpected_cfgs)]
 
-use std::alloc::{GlobalAlloc, Layout, System};
+use std::alloc::System;
 
 #[cfg(feature = "mimalloc")]
 use mimalloc::MiMalloc;
@@ -196,58 +196,6 @@ pub static GOOGLE_TC: GoogleTcMalloc = GoogleTcMalloc;
 pub struct SendPtr(pub *mut u8);
 unsafe impl Send for SendPtr {}
 
-/// Alloc then immediately dealloc.
-///
-/// # Safety
-/// Caller must pass a valid allocator and layout.
-#[inline]
-pub unsafe fn alloc_dealloc(allocator: &dyn GlobalAlloc, layout: Layout) {
-    let ptr = unsafe { allocator.alloc(layout) };
-    assert!(!ptr.is_null());
-    unsafe { allocator.dealloc(ptr, layout) };
-}
-
-/// Allocate `n` objects, then free them all in reverse order.
-///
-/// # Safety
-/// Caller must pass a valid allocator and layout.
-#[inline]
-pub unsafe fn alloc_n_then_free(allocator: &dyn GlobalAlloc, layout: Layout, n: usize) {
-    let mut ptrs = Vec::with_capacity(n);
-    for _ in 0..n {
-        let ptr = unsafe { allocator.alloc(layout) };
-        assert!(!ptr.is_null());
-        ptrs.push(ptr);
-    }
-    for ptr in ptrs.into_iter().rev() {
-        unsafe { allocator.dealloc(ptr, layout) };
-    }
-}
-
-/// Alloc 10 objects per round, free half, repeat. Simulates realistic churn.
-///
-/// # Safety
-/// Caller must pass a valid allocator and layout.
-#[inline]
-pub unsafe fn churn(allocator: &dyn GlobalAlloc, layout: Layout, rounds: usize) {
-    let mut live: Vec<*mut u8> = Vec::new();
-    for _ in 0..rounds {
-        for _ in 0..10 {
-            let ptr = unsafe { allocator.alloc(layout) };
-            assert!(!ptr.is_null());
-            live.push(ptr);
-        }
-        let drain = live.len() / 2;
-        for _ in 0..drain {
-            let ptr = live.pop().unwrap();
-            unsafe { allocator.dealloc(ptr, layout) };
-        }
-    }
-    for ptr in live {
-        unsafe { allocator.dealloc(ptr, layout) };
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Macro to reduce repetitive per-allocator benchmark registration
 // ---------------------------------------------------------------------------
@@ -257,19 +205,19 @@ pub unsafe fn churn(allocator: &dyn GlobalAlloc, layout: Layout, rounds: usize) 
 /// The closure receives `(b: &mut criterion::Bencher, alloc: &dyn GlobalAlloc)`.
 #[macro_export]
 macro_rules! bench_all_allocators {
-    ($group:expr, $suffix:expr, |$b:ident, $alloc:ident : &dyn GlobalAlloc| $body:expr) => {{
+    ($group:expr, $suffix:expr, |$b:ident, $alloc:ident| $body:expr) => {{
         #[cfg(feature = "system")]
         $group.bench_function(
             format!("system{}", $suffix),
             |$b: &mut criterion::Bencher| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::SYSTEM;
+                let $alloc = &$crate::SYSTEM;
                 $body
             },
         );
         $group.bench_function(
             format!("rt_nightly{}", $suffix),
             |$b: &mut criterion::Bencher| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::RTMALLOC_NIGHTLY;
+                let $alloc = &$crate::RTMALLOC_NIGHTLY;
                 $body
             },
         );
@@ -277,21 +225,21 @@ macro_rules! bench_all_allocators {
         $group.bench_function(
             format!("rt_percpu{}", $suffix),
             |$b: &mut criterion::Bencher| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::RTMALLOC_PERCPU;
+                let $alloc = &$crate::RTMALLOC_PERCPU;
                 $body
             },
         );
         $group.bench_function(
             format!("rt_std{}", $suffix),
             |$b: &mut criterion::Bencher| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::RTMALLOC_STD;
+                let $alloc = &$crate::RTMALLOC_STD;
                 $body
             },
         );
         $group.bench_function(
             format!("rt_nostd{}", $suffix),
             |$b: &mut criterion::Bencher| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::RTMALLOC_NOSTD;
+                let $alloc = &$crate::RTMALLOC_NOSTD;
                 $body
             },
         );
@@ -299,7 +247,7 @@ macro_rules! bench_all_allocators {
         $group.bench_function(
             format!("mimalloc{}", $suffix),
             |$b: &mut criterion::Bencher| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::MIMALLOC;
+                let $alloc = &$crate::MIMALLOC;
                 $body
             },
         );
@@ -307,7 +255,7 @@ macro_rules! bench_all_allocators {
         $group.bench_function(
             format!("google_tc{}", $suffix),
             |$b: &mut criterion::Bencher| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::GOOGLE_TC;
+                let $alloc = &$crate::GOOGLE_TC;
                 $body
             },
         );
@@ -315,7 +263,7 @@ macro_rules! bench_all_allocators {
         $group.bench_function(
             format!("snmalloc{}", $suffix),
             |$b: &mut criterion::Bencher| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::SNMALLOC;
+                let $alloc = &$crate::SNMALLOC;
                 $body
             },
         );
@@ -323,7 +271,7 @@ macro_rules! bench_all_allocators {
         $group.bench_function(
             format!("rpmalloc{}", $suffix),
             |$b: &mut criterion::Bencher| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::RPMALLOC;
+                let $alloc = &$crate::RPMALLOC;
                 $body
             },
         );
@@ -331,7 +279,7 @@ macro_rules! bench_all_allocators {
         $group.bench_function(
             format!("jemalloc{}", $suffix),
             |$b: &mut criterion::Bencher| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::JEMALLOC;
+                let $alloc = &$crate::JEMALLOC;
                 $body
             },
         );
@@ -343,13 +291,13 @@ macro_rules! bench_all_allocators {
 /// The closure receives `(b: &mut criterion::Bencher, alloc: &dyn GlobalAlloc)`.
 #[macro_export]
 macro_rules! bench_all_allocators_param {
-    ($group:expr, $param:expr, |$b:ident, $alloc:ident : &dyn GlobalAlloc| $body:expr) => {{
+    ($group:expr, $param:expr, |$b:ident, $alloc:ident| $body:expr) => {{
         #[cfg(feature = "system")]
         $group.bench_with_input(
             criterion::BenchmarkId::new("system", $param),
             &$param,
             |$b: &mut criterion::Bencher, _| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::SYSTEM;
+                let $alloc = &$crate::SYSTEM;
                 $body
             },
         );
@@ -357,7 +305,7 @@ macro_rules! bench_all_allocators_param {
             criterion::BenchmarkId::new("rt_nightly", $param),
             &$param,
             |$b: &mut criterion::Bencher, _| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::RTMALLOC_NIGHTLY;
+                let $alloc = &$crate::RTMALLOC_NIGHTLY;
                 $body
             },
         );
@@ -366,7 +314,7 @@ macro_rules! bench_all_allocators_param {
             criterion::BenchmarkId::new("rt_percpu", $param),
             &$param,
             |$b: &mut criterion::Bencher, _| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::RTMALLOC_PERCPU;
+                let $alloc = &$crate::RTMALLOC_PERCPU;
                 $body
             },
         );
@@ -374,7 +322,7 @@ macro_rules! bench_all_allocators_param {
             criterion::BenchmarkId::new("rt_std", $param),
             &$param,
             |$b: &mut criterion::Bencher, _| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::RTMALLOC_STD;
+                let $alloc = &$crate::RTMALLOC_STD;
                 $body
             },
         );
@@ -382,7 +330,7 @@ macro_rules! bench_all_allocators_param {
             criterion::BenchmarkId::new("rt_nostd", $param),
             &$param,
             |$b: &mut criterion::Bencher, _| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::RTMALLOC_NOSTD;
+                let $alloc = &$crate::RTMALLOC_NOSTD;
                 $body
             },
         );
@@ -391,7 +339,7 @@ macro_rules! bench_all_allocators_param {
             criterion::BenchmarkId::new("mimalloc", $param),
             &$param,
             |$b: &mut criterion::Bencher, _| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::MIMALLOC;
+                let $alloc = &$crate::MIMALLOC;
                 $body
             },
         );
@@ -400,7 +348,7 @@ macro_rules! bench_all_allocators_param {
             criterion::BenchmarkId::new("google_tc", $param),
             &$param,
             |$b: &mut criterion::Bencher, _| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::GOOGLE_TC;
+                let $alloc = &$crate::GOOGLE_TC;
                 $body
             },
         );
@@ -409,7 +357,7 @@ macro_rules! bench_all_allocators_param {
             criterion::BenchmarkId::new("snmalloc", $param),
             &$param,
             |$b: &mut criterion::Bencher, _| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::SNMALLOC;
+                let $alloc = &$crate::SNMALLOC;
                 $body
             },
         );
@@ -418,7 +366,7 @@ macro_rules! bench_all_allocators_param {
             criterion::BenchmarkId::new("rpmalloc", $param),
             &$param,
             |$b: &mut criterion::Bencher, _| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::RPMALLOC;
+                let $alloc = &$crate::RPMALLOC;
                 $body
             },
         );
@@ -427,7 +375,7 @@ macro_rules! bench_all_allocators_param {
             criterion::BenchmarkId::new("jemalloc", $param),
             &$param,
             |$b: &mut criterion::Bencher, _| {
-                let $alloc: &dyn std::alloc::GlobalAlloc = &$crate::JEMALLOC;
+                let $alloc = &$crate::JEMALLOC;
                 $body
             },
         );
