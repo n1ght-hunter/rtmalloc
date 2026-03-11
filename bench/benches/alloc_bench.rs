@@ -7,234 +7,10 @@
 //! After criterion finishes, a colored comparison table is printed.
 #![allow(unexpected_cfgs)]
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
-use std::alloc::{GlobalAlloc, Layout, System};
+use criterion::{Criterion, Throughput, criterion_group};
+use rtmalloc_bench::*;
+use std::alloc::{GlobalAlloc, Layout};
 use std::hint::black_box;
-
-#[cfg(feature = "mimalloc")]
-use mimalloc::MiMalloc;
-#[cfg(feature = "rpmalloc")]
-use rpmalloc::RpMalloc;
-#[cfg(feature = "snmalloc")]
-use snmalloc_rs::SnMalloc;
-#[cfg(all(has_jemalloc, feature = "jemalloc"))]
-use tikv_jemallocator::Jemalloc;
-
-// ---------------------------------------------------------------------------
-// rtmalloc FFI (statically linked, built by build.rs with --profile fast)
-// ---------------------------------------------------------------------------
-
-mod rtmalloc_ffi {
-    use std::alloc::{GlobalAlloc, Layout};
-
-    unsafe extern "C" {
-        // Nightly variant (#[thread_local] thread cache)
-        fn rtmalloc_nightly_alloc(size: usize, align: usize) -> *mut u8;
-        fn rtmalloc_nightly_dealloc(ptr: *mut u8, size: usize, align: usize);
-        fn rtmalloc_nightly_realloc(
-            ptr: *mut u8,
-            size: usize,
-            align: usize,
-            new_size: usize,
-        ) -> *mut u8;
-
-        // Std variant (std::thread_local! thread cache)
-        fn rtmalloc_std_alloc(size: usize, align: usize) -> *mut u8;
-        fn rtmalloc_std_dealloc(ptr: *mut u8, size: usize, align: usize);
-        fn rtmalloc_std_realloc(
-            ptr: *mut u8,
-            size: usize,
-            align: usize,
-            new_size: usize,
-        ) -> *mut u8;
-
-        // Nostd variant (central cache only, no thread cache)
-        fn rtmalloc_nostd_alloc(size: usize, align: usize) -> *mut u8;
-        fn rtmalloc_nostd_dealloc(ptr: *mut u8, size: usize, align: usize);
-        fn rtmalloc_nostd_realloc(
-            ptr: *mut u8,
-            size: usize,
-            align: usize,
-            new_size: usize,
-        ) -> *mut u8;
-    }
-
-    // Per-CPU variant (rseq, Linux x86_64 only)
-    #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
-    unsafe extern "C" {
-        fn rtmalloc_percpu_alloc(size: usize, align: usize) -> *mut u8;
-        fn rtmalloc_percpu_dealloc(ptr: *mut u8, size: usize, align: usize);
-        fn rtmalloc_percpu_realloc(
-            ptr: *mut u8,
-            size: usize,
-            align: usize,
-            new_size: usize,
-        ) -> *mut u8;
-    }
-
-    macro_rules! impl_ffi_alloc {
-        ($name:ident, $alloc:ident, $dealloc:ident, $realloc:ident) => {
-            pub struct $name;
-
-            unsafe impl GlobalAlloc for $name {
-                unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-                    unsafe { $alloc(layout.size(), layout.align()) }
-                }
-                unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-                    unsafe { $dealloc(ptr, layout.size(), layout.align()) }
-                }
-                unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-                    unsafe { $realloc(ptr, layout.size(), layout.align(), new_size) }
-                }
-            }
-
-            unsafe impl Send for $name {}
-            unsafe impl Sync for $name {}
-        };
-    }
-
-    impl_ffi_alloc!(
-        RtmallocNightly,
-        rtmalloc_nightly_alloc,
-        rtmalloc_nightly_dealloc,
-        rtmalloc_nightly_realloc
-    );
-    impl_ffi_alloc!(
-        RtmallocStd,
-        rtmalloc_std_alloc,
-        rtmalloc_std_dealloc,
-        rtmalloc_std_realloc
-    );
-    impl_ffi_alloc!(
-        RtmallocNostd,
-        rtmalloc_nostd_alloc,
-        rtmalloc_nostd_dealloc,
-        rtmalloc_nostd_realloc
-    );
-    #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
-    impl_ffi_alloc!(
-        RtmallocPercpu,
-        rtmalloc_percpu_alloc,
-        rtmalloc_percpu_dealloc,
-        rtmalloc_percpu_realloc
-    );
-}
-
-#[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
-use rtmalloc_ffi::RtmallocPercpu;
-use rtmalloc_ffi::{RtmallocNightly, RtmallocNostd, RtmallocStd};
-
-// ---------------------------------------------------------------------------
-// Google tcmalloc FFI (statically linked when available)
-// ---------------------------------------------------------------------------
-
-#[cfg(has_google_tcmalloc)]
-mod google_tc {
-    use std::alloc::{GlobalAlloc, Layout};
-
-    #[allow(clippy::duplicated_attributes)]
-    #[link(name = "tcmalloc_minimal", kind = "static")]
-    #[link(name = "common", kind = "static")]
-    #[link(name = "low_level_alloc", kind = "static")]
-    unsafe extern "C" {
-        fn tc_malloc(size: usize) -> *mut u8;
-        fn tc_free(ptr: *mut u8);
-        fn tc_realloc(ptr: *mut u8, size: usize) -> *mut u8;
-        fn tc_memalign(align: usize, size: usize) -> *mut u8;
-    }
-
-    pub struct GoogleTcMalloc;
-
-    unsafe impl GlobalAlloc for GoogleTcMalloc {
-        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            if layout.align() <= 8 {
-                unsafe { tc_malloc(layout.size()) }
-            } else {
-                unsafe { tc_memalign(layout.align(), layout.size()) }
-            }
-        }
-
-        unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-            unsafe { tc_free(ptr) }
-        }
-
-        unsafe fn realloc(&self, ptr: *mut u8, _layout: Layout, new_size: usize) -> *mut u8 {
-            unsafe { tc_realloc(ptr, new_size) }
-        }
-    }
-
-    unsafe impl Sync for GoogleTcMalloc {}
-    unsafe impl Send for GoogleTcMalloc {}
-}
-
-#[cfg(has_google_tcmalloc)]
-use google_tc::GoogleTcMalloc;
-
-#[cfg(feature = "system")]
-static SYSTEM: System = System;
-static RTMALLOC_NIGHTLY: RtmallocNightly = RtmallocNightly;
-static RTMALLOC_STD: RtmallocStd = RtmallocStd;
-static RTMALLOC_NOSTD: RtmallocNostd = RtmallocNostd;
-#[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
-static RTMALLOC_PERCPU: RtmallocPercpu = RtmallocPercpu;
-#[cfg(feature = "mimalloc")]
-static MIMALLOC: MiMalloc = MiMalloc;
-#[cfg(feature = "snmalloc")]
-static SNMALLOC: SnMalloc = SnMalloc;
-#[cfg(feature = "rpmalloc")]
-static RPMALLOC: RpMalloc = RpMalloc;
-#[cfg(all(has_jemalloc, feature = "jemalloc"))]
-static JEMALLOC: Jemalloc = Jemalloc;
-#[cfg(has_google_tcmalloc)]
-static GOOGLE_TC: GoogleTcMalloc = GoogleTcMalloc;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Wrapper to send raw pointers across threads in benchmarks.
-/// Safety: the benchmarks ensure each pointer is only used by one thread at a time.
-struct SendPtr(*mut u8);
-unsafe impl Send for SendPtr {}
-
-// ---------------------------------------------------------------------------
-
-unsafe fn alloc_dealloc(allocator: &dyn GlobalAlloc, layout: Layout) {
-    let ptr = unsafe { allocator.alloc(layout) };
-    assert!(!ptr.is_null());
-    unsafe { allocator.dealloc(ptr, layout) };
-}
-
-unsafe fn alloc_n_then_free(allocator: &dyn GlobalAlloc, layout: Layout, n: usize) {
-    let mut ptrs = Vec::with_capacity(n);
-    for _ in 0..n {
-        let ptr = unsafe { allocator.alloc(layout) };
-        assert!(!ptr.is_null());
-        ptrs.push(ptr);
-    }
-    for ptr in ptrs.into_iter().rev() {
-        unsafe { allocator.dealloc(ptr, layout) };
-    }
-}
-
-unsafe fn churn(allocator: &dyn GlobalAlloc, layout: Layout, rounds: usize) {
-    let mut live: Vec<*mut u8> = Vec::new();
-    for _ in 0..rounds {
-        for _ in 0..10 {
-            let ptr = unsafe { allocator.alloc(layout) };
-            assert!(!ptr.is_null());
-            live.push(ptr);
-        }
-        let drain = live.len() / 2;
-        for _ in 0..drain {
-            let ptr = live.pop().unwrap();
-            unsafe { allocator.dealloc(ptr, layout) };
-        }
-    }
-    for ptr in live {
-        unsafe { allocator.dealloc(ptr, layout) };
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Benchmarks
@@ -247,43 +23,8 @@ fn bench_single_alloc_dealloc(c: &mut Criterion) {
     for &size in sizes {
         let layout = Layout::from_size_align(size, 8).unwrap();
         group.throughput(Throughput::Elements(1));
-
-        #[cfg(feature = "system")]
-        group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&SYSTEM, layout) })
-        });
-        group.bench_with_input(BenchmarkId::new("rt_nightly", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&RTMALLOC_NIGHTLY, layout) })
-        });
-        #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
-        group.bench_with_input(BenchmarkId::new("rt_percpu", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&RTMALLOC_PERCPU, layout) })
-        });
-        group.bench_with_input(BenchmarkId::new("rt_std", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&RTMALLOC_STD, layout) })
-        });
-        group.bench_with_input(BenchmarkId::new("rt_nostd", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&RTMALLOC_NOSTD, layout) })
-        });
-        #[cfg(feature = "mimalloc")]
-        group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&MIMALLOC, layout) })
-        });
-        #[cfg(has_google_tcmalloc)]
-        group.bench_with_input(BenchmarkId::new("google_tc", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&GOOGLE_TC, layout) })
-        });
-        #[cfg(feature = "snmalloc")]
-        group.bench_with_input(BenchmarkId::new("snmalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&SNMALLOC, layout) })
-        });
-        #[cfg(feature = "rpmalloc")]
-        group.bench_with_input(BenchmarkId::new("rpmalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&RPMALLOC, layout) })
-        });
-        #[cfg(all(has_jemalloc, feature = "jemalloc"))]
-        group.bench_with_input(BenchmarkId::new("jemalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&JEMALLOC, layout) })
+        bench_all_allocators_param!(group, size, |b, alloc: &dyn GlobalAlloc| {
+            b.iter(|| unsafe { alloc_dealloc(alloc, layout) })
         });
     }
     group.finish();
@@ -297,43 +38,8 @@ fn bench_batch_alloc_free(c: &mut Criterion) {
     for &size in sizes {
         let layout = Layout::from_size_align(size, 8).unwrap();
         group.throughput(Throughput::Elements(n as u64));
-
-        #[cfg(feature = "system")]
-        group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&SYSTEM, layout, n) })
-        });
-        group.bench_with_input(BenchmarkId::new("rt_nightly", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&RTMALLOC_NIGHTLY, layout, n) })
-        });
-        #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
-        group.bench_with_input(BenchmarkId::new("rt_percpu", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&RTMALLOC_PERCPU, layout, n) })
-        });
-        group.bench_with_input(BenchmarkId::new("rt_std", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&RTMALLOC_STD, layout, n) })
-        });
-        group.bench_with_input(BenchmarkId::new("rt_nostd", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&RTMALLOC_NOSTD, layout, n) })
-        });
-        #[cfg(feature = "mimalloc")]
-        group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&MIMALLOC, layout, n) })
-        });
-        #[cfg(has_google_tcmalloc)]
-        group.bench_with_input(BenchmarkId::new("google_tc", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&GOOGLE_TC, layout, n) })
-        });
-        #[cfg(feature = "snmalloc")]
-        group.bench_with_input(BenchmarkId::new("snmalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&SNMALLOC, layout, n) })
-        });
-        #[cfg(feature = "rpmalloc")]
-        group.bench_with_input(BenchmarkId::new("rpmalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&RPMALLOC, layout, n) })
-        });
-        #[cfg(all(has_jemalloc, feature = "jemalloc"))]
-        group.bench_with_input(BenchmarkId::new("jemalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&JEMALLOC, layout, n) })
+        bench_all_allocators_param!(group, size, |b, alloc: &dyn GlobalAlloc| {
+            b.iter(|| unsafe { alloc_n_then_free(alloc, layout, n) })
         });
     }
     group.finish();
@@ -347,43 +53,8 @@ fn bench_churn(c: &mut Criterion) {
     for &size in sizes {
         let layout = Layout::from_size_align(size, 8).unwrap();
         group.throughput(Throughput::Elements(rounds as u64 * 10));
-
-        #[cfg(feature = "system")]
-        group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&SYSTEM, layout, rounds) })
-        });
-        group.bench_with_input(BenchmarkId::new("rt_nightly", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&RTMALLOC_NIGHTLY, layout, rounds) })
-        });
-        #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
-        group.bench_with_input(BenchmarkId::new("rt_percpu", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&RTMALLOC_PERCPU, layout, rounds) })
-        });
-        group.bench_with_input(BenchmarkId::new("rt_std", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&RTMALLOC_STD, layout, rounds) })
-        });
-        group.bench_with_input(BenchmarkId::new("rt_nostd", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&RTMALLOC_NOSTD, layout, rounds) })
-        });
-        #[cfg(feature = "mimalloc")]
-        group.bench_with_input(BenchmarkId::new("mimalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&MIMALLOC, layout, rounds) })
-        });
-        #[cfg(has_google_tcmalloc)]
-        group.bench_with_input(BenchmarkId::new("google_tc", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&GOOGLE_TC, layout, rounds) })
-        });
-        #[cfg(feature = "snmalloc")]
-        group.bench_with_input(BenchmarkId::new("snmalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&SNMALLOC, layout, rounds) })
-        });
-        #[cfg(feature = "rpmalloc")]
-        group.bench_with_input(BenchmarkId::new("rpmalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&RPMALLOC, layout, rounds) })
-        });
-        #[cfg(all(has_jemalloc, feature = "jemalloc"))]
-        group.bench_with_input(BenchmarkId::new("jemalloc", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&JEMALLOC, layout, rounds) })
+        bench_all_allocators_param!(group, size, |b, alloc: &dyn GlobalAlloc| {
+            b.iter(|| unsafe { churn(alloc, layout, rounds) })
         });
     }
     group.finish();
@@ -417,42 +88,8 @@ fn bench_vec_push(c: &mut Criterion) {
         unsafe { allocator.dealloc(ptr, layout) };
     }
 
-    #[cfg(feature = "system")]
-    group.bench_function("system", |b| {
-        b.iter(|| simulate_vec_growth(&SYSTEM, black_box(final_len)))
-    });
-    group.bench_function("rt_nightly", |b| {
-        b.iter(|| simulate_vec_growth(&RTMALLOC_NIGHTLY, black_box(final_len)))
-    });
-    #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
-    group.bench_function("rt_percpu", |b| {
-        b.iter(|| simulate_vec_growth(&RTMALLOC_PERCPU, black_box(final_len)))
-    });
-    group.bench_function("rt_std", |b| {
-        b.iter(|| simulate_vec_growth(&RTMALLOC_STD, black_box(final_len)))
-    });
-    group.bench_function("rt_nostd", |b| {
-        b.iter(|| simulate_vec_growth(&RTMALLOC_NOSTD, black_box(final_len)))
-    });
-    #[cfg(feature = "mimalloc")]
-    group.bench_function("mimalloc", |b| {
-        b.iter(|| simulate_vec_growth(&MIMALLOC, black_box(final_len)))
-    });
-    #[cfg(has_google_tcmalloc)]
-    group.bench_function("google_tc", |b| {
-        b.iter(|| simulate_vec_growth(&GOOGLE_TC, black_box(final_len)))
-    });
-    #[cfg(feature = "snmalloc")]
-    group.bench_function("snmalloc", |b| {
-        b.iter(|| simulate_vec_growth(&SNMALLOC, black_box(final_len)))
-    });
-    #[cfg(feature = "rpmalloc")]
-    group.bench_function("rpmalloc", |b| {
-        b.iter(|| simulate_vec_growth(&RPMALLOC, black_box(final_len)))
-    });
-    #[cfg(all(has_jemalloc, feature = "jemalloc"))]
-    group.bench_function("jemalloc", |b| {
-        b.iter(|| simulate_vec_growth(&JEMALLOC, black_box(final_len)))
+    bench_all_allocators!(group, "", |b, alloc: &dyn GlobalAlloc| {
+        b.iter(|| simulate_vec_growth(alloc, black_box(final_len)))
     });
 
     group.finish();
@@ -492,43 +129,8 @@ fn bench_multithreaded(c: &mut Criterion) {
         }
     }
 
-    #[cfg(feature = "system")]
-    group.bench_function("system", |b| {
-        b.iter(|| mt_workload(&SYSTEM, nthreads, ops_per_thread))
-    });
-    group.bench_function("rt_nightly", |b| {
-        b.iter(|| mt_workload(&RTMALLOC_NIGHTLY, nthreads, ops_per_thread))
-    });
-    // rt_percpu uses rseq (restartable sequences) which valgrind cannot emulate
-    #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
-    group.bench_function("rt_percpu", |b| {
-        b.iter(|| mt_workload(&RTMALLOC_PERCPU, nthreads, ops_per_thread))
-    });
-    group.bench_function("rt_std", |b| {
-        b.iter(|| mt_workload(&RTMALLOC_STD, nthreads, ops_per_thread))
-    });
-    group.bench_function("rt_nostd", |b| {
-        b.iter(|| mt_workload(&RTMALLOC_NOSTD, nthreads, ops_per_thread))
-    });
-    #[cfg(feature = "mimalloc")]
-    group.bench_function("mimalloc", |b| {
-        b.iter(|| mt_workload(&MIMALLOC, nthreads, ops_per_thread))
-    });
-    #[cfg(has_google_tcmalloc)]
-    group.bench_function("google_tc", |b| {
-        b.iter(|| mt_workload(&GOOGLE_TC, nthreads, ops_per_thread))
-    });
-    #[cfg(feature = "snmalloc")]
-    group.bench_function("snmalloc", |b| {
-        b.iter(|| mt_workload(&SNMALLOC, nthreads, ops_per_thread))
-    });
-    #[cfg(feature = "rpmalloc")]
-    group.bench_function("rpmalloc", |b| {
-        b.iter(|| mt_workload(&RPMALLOC, nthreads, ops_per_thread))
-    });
-    #[cfg(all(has_jemalloc, feature = "jemalloc"))]
-    group.bench_function("jemalloc", |b| {
-        b.iter(|| mt_workload(&JEMALLOC, nthreads, ops_per_thread))
+    bench_all_allocators_static!(group, "", |b, alloc| {
+        b.iter(|| mt_workload(alloc, nthreads, ops_per_thread))
     });
 
     group.finish();
@@ -544,10 +146,6 @@ fn bench_cross_thread_free(c: &mut Criterion) {
     let nthreads = 4;
     group.throughput(Throughput::Elements((ops * nthreads) as u64));
 
-    /// Allocate objects on producer threads, send them to consumer threads for
-    /// deallocation. This is the core pattern that stresses thread caches —
-    /// the freeing thread didn't allocate the object, so it must return it
-    /// through the central path (or transfer cache).
     fn cross_thread_workload<A: GlobalAlloc + Sync>(
         allocator: &'static A,
         nthreads: usize,
@@ -556,7 +154,6 @@ fn bench_cross_thread_free(c: &mut Criterion) {
         use std::sync::mpsc;
         let layout = Layout::from_size_align(64, 8).unwrap();
 
-        // Each producer has a paired consumer.
         let mut producer_handles = Vec::new();
         let mut consumer_handles = Vec::new();
 
@@ -581,48 +178,13 @@ fn bench_cross_thread_free(c: &mut Criterion) {
         for h in producer_handles {
             h.join().unwrap();
         }
-        // Producers are done and dropped their tx, consumers will drain and exit.
         for h in consumer_handles {
             h.join().unwrap();
         }
     }
 
-    #[cfg(feature = "system")]
-    group.bench_function("system", |b| {
-        b.iter(|| cross_thread_workload(&SYSTEM, nthreads, ops))
-    });
-    group.bench_function("rt_nightly", |b| {
-        b.iter(|| cross_thread_workload(&RTMALLOC_NIGHTLY, nthreads, ops))
-    });
-    #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
-    group.bench_function("rt_percpu", |b| {
-        b.iter(|| cross_thread_workload(&RTMALLOC_PERCPU, nthreads, ops))
-    });
-    group.bench_function("rt_std", |b| {
-        b.iter(|| cross_thread_workload(&RTMALLOC_STD, nthreads, ops))
-    });
-    group.bench_function("rt_nostd", |b| {
-        b.iter(|| cross_thread_workload(&RTMALLOC_NOSTD, nthreads, ops))
-    });
-    #[cfg(feature = "mimalloc")]
-    group.bench_function("mimalloc", |b| {
-        b.iter(|| cross_thread_workload(&MIMALLOC, nthreads, ops))
-    });
-    #[cfg(has_google_tcmalloc)]
-    group.bench_function("google_tc", |b| {
-        b.iter(|| cross_thread_workload(&GOOGLE_TC, nthreads, ops))
-    });
-    #[cfg(feature = "snmalloc")]
-    group.bench_function("snmalloc", |b| {
-        b.iter(|| cross_thread_workload(&SNMALLOC, nthreads, ops))
-    });
-    #[cfg(feature = "rpmalloc")]
-    group.bench_function("rpmalloc", |b| {
-        b.iter(|| cross_thread_workload(&RPMALLOC, nthreads, ops))
-    });
-    #[cfg(all(has_jemalloc, feature = "jemalloc"))]
-    group.bench_function("jemalloc", |b| {
-        b.iter(|| cross_thread_workload(&JEMALLOC, nthreads, ops))
+    bench_all_allocators_static!(group, "", |b, alloc| {
+        b.iter(|| cross_thread_workload(alloc, nthreads, ops))
     });
 
     group.finish();
@@ -666,60 +228,9 @@ fn bench_thread_scalability(c: &mut Criterion) {
 
     for &nthreads in &[1usize, 2, 4, 8] {
         group.throughput(Throughput::Elements((ops_per_thread * nthreads) as u64));
-
-        #[cfg(feature = "system")]
-        group.bench_with_input(BenchmarkId::new("system", nthreads), &nthreads, |b, &nt| {
-            b.iter(|| scale_workload(&SYSTEM, nt, ops_per_thread))
+        bench_all_allocators_static!(group, nthreads, |b, alloc| {
+            b.iter(|| scale_workload(alloc, nthreads, ops_per_thread))
         });
-        group.bench_with_input(
-            BenchmarkId::new("rt_nightly", nthreads),
-            &nthreads,
-            |b, &nt| b.iter(|| scale_workload(&RTMALLOC_NIGHTLY, nt, ops_per_thread)),
-        );
-        #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
-        group.bench_with_input(
-            BenchmarkId::new("rt_percpu", nthreads),
-            &nthreads,
-            |b, &nt| b.iter(|| scale_workload(&RTMALLOC_PERCPU, nt, ops_per_thread)),
-        );
-        group.bench_with_input(BenchmarkId::new("rt_std", nthreads), &nthreads, |b, &nt| {
-            b.iter(|| scale_workload(&RTMALLOC_STD, nt, ops_per_thread))
-        });
-        group.bench_with_input(
-            BenchmarkId::new("rt_nostd", nthreads),
-            &nthreads,
-            |b, &nt| b.iter(|| scale_workload(&RTMALLOC_NOSTD, nt, ops_per_thread)),
-        );
-        #[cfg(feature = "mimalloc")]
-        group.bench_with_input(
-            BenchmarkId::new("mimalloc", nthreads),
-            &nthreads,
-            |b, &nt| b.iter(|| scale_workload(&MIMALLOC, nt, ops_per_thread)),
-        );
-        #[cfg(has_google_tcmalloc)]
-        group.bench_with_input(
-            BenchmarkId::new("google_tc", nthreads),
-            &nthreads,
-            |b, &nt| b.iter(|| scale_workload(&GOOGLE_TC, nt, ops_per_thread)),
-        );
-        #[cfg(feature = "snmalloc")]
-        group.bench_with_input(
-            BenchmarkId::new("snmalloc", nthreads),
-            &nthreads,
-            |b, &nt| b.iter(|| scale_workload(&SNMALLOC, nt, ops_per_thread)),
-        );
-        #[cfg(feature = "rpmalloc")]
-        group.bench_with_input(
-            BenchmarkId::new("rpmalloc", nthreads),
-            &nthreads,
-            |b, &nt| b.iter(|| scale_workload(&RPMALLOC, nt, ops_per_thread)),
-        );
-        #[cfg(all(has_jemalloc, feature = "jemalloc"))]
-        group.bench_with_input(
-            BenchmarkId::new("jemalloc", nthreads),
-            &nthreads,
-            |b, &nt| b.iter(|| scale_workload(&JEMALLOC, nt, ops_per_thread)),
-        );
     }
 
     group.finish();
@@ -734,11 +245,7 @@ fn bench_mixed_sizes(c: &mut Criterion) {
     let n = 10_000usize;
     group.throughput(Throughput::Elements(n as u64));
 
-    /// Mimalloc-style size distribution: linearly distributed in powers-of-2
-    /// buckets, with 1% large objects (100x base) and 0.1% huge objects (1000x).
-    /// Uses a deterministic PRNG for reproducibility.
     fn mixed_workload(allocator: &dyn GlobalAlloc, n: usize) {
-        // Splitmix64 PRNG (deterministic, fast, good enough for size distribution)
         let mut rng_state: u64 = 0xDEAD_BEEF_CAFE_BABE;
         let mut next_u64 = || -> u64 {
             rng_state = rng_state.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -754,11 +261,10 @@ fn bench_mixed_sizes(c: &mut Criterion) {
         for _ in 0..n {
             let r = next_u64();
             let base = base_sizes[(r as usize) % base_sizes.len()];
-            // 1% large, 0.1% huge
             let size = if r % 1000 == 0 {
-                base * 1000 // huge
+                base * 1000
             } else if r % 100 == 0 {
-                base * 100 // large
+                base * 100
             } else {
                 base
             };
@@ -767,7 +273,6 @@ fn bench_mixed_sizes(c: &mut Criterion) {
             assert!(!ptr.is_null());
             ptrs.push((ptr, layout));
 
-            // Free ~30% of live objects to maintain churn
             if ptrs.len() > 10 && r % 3 == 0 {
                 let idx = (next_u64() as usize) % ptrs.len();
                 let (p, l) = ptrs.swap_remove(idx);
@@ -780,42 +285,8 @@ fn bench_mixed_sizes(c: &mut Criterion) {
         }
     }
 
-    #[cfg(feature = "system")]
-    group.bench_function("system", |b| {
-        b.iter(|| mixed_workload(&SYSTEM, black_box(n)))
-    });
-    group.bench_function("rt_nightly", |b| {
-        b.iter(|| mixed_workload(&RTMALLOC_NIGHTLY, black_box(n)))
-    });
-    #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
-    group.bench_function("rt_percpu", |b| {
-        b.iter(|| mixed_workload(&RTMALLOC_PERCPU, black_box(n)))
-    });
-    group.bench_function("rt_std", |b| {
-        b.iter(|| mixed_workload(&RTMALLOC_STD, black_box(n)))
-    });
-    group.bench_function("rt_nostd", |b| {
-        b.iter(|| mixed_workload(&RTMALLOC_NOSTD, black_box(n)))
-    });
-    #[cfg(feature = "mimalloc")]
-    group.bench_function("mimalloc", |b| {
-        b.iter(|| mixed_workload(&MIMALLOC, black_box(n)))
-    });
-    #[cfg(has_google_tcmalloc)]
-    group.bench_function("google_tc", |b| {
-        b.iter(|| mixed_workload(&GOOGLE_TC, black_box(n)))
-    });
-    #[cfg(feature = "snmalloc")]
-    group.bench_function("snmalloc", |b| {
-        b.iter(|| mixed_workload(&SNMALLOC, black_box(n)))
-    });
-    #[cfg(feature = "rpmalloc")]
-    group.bench_function("rpmalloc", |b| {
-        b.iter(|| mixed_workload(&RPMALLOC, black_box(n)))
-    });
-    #[cfg(all(has_jemalloc, feature = "jemalloc"))]
-    group.bench_function("jemalloc", |b| {
-        b.iter(|| mixed_workload(&JEMALLOC, black_box(n)))
+    bench_all_allocators!(group, "", |b, alloc: &dyn GlobalAlloc| {
+        b.iter(|| mixed_workload(alloc, black_box(n)))
     });
 
     group.finish();
@@ -831,14 +302,9 @@ fn bench_producer_consumer(c: &mut Criterion) {
     let npairs = 4;
     group.throughput(Throughput::Elements((ops_per_producer * npairs) as u64));
 
-    /// Asymmetric workload: producer threads only allocate and send pointers
-    /// through a channel; consumer threads only receive and free. This is the
-    /// worst case for thread-local caches because every free goes through the
-    /// slow path (the freeing thread never allocated from its own cache).
     fn pc_workload<A: GlobalAlloc + Sync>(allocator: &'static A, npairs: usize, ops: usize) {
         use std::sync::mpsc;
 
-        // Use mixed sizes to stress multiple size classes simultaneously.
         let sizes: &[usize] = &[16, 64, 256, 1024];
         let mut producers = Vec::new();
         let mut consumers = Vec::new();
@@ -871,43 +337,105 @@ fn bench_producer_consumer(c: &mut Criterion) {
         }
     }
 
-    #[cfg(feature = "system")]
-    group.bench_function("system", |b| {
-        b.iter(|| pc_workload(&SYSTEM, npairs, ops_per_producer))
+    bench_all_allocators_static!(group, "", |b, alloc| {
+        b.iter(|| pc_workload(alloc, npairs, ops_per_producer))
     });
-    group.bench_function("rt_nightly", |b| {
-        b.iter(|| pc_workload(&RTMALLOC_NIGHTLY, npairs, ops_per_producer))
-    });
-    #[cfg(all(has_rtmalloc_percpu, not(feature = "callgrind")))]
-    group.bench_function("rt_percpu", |b| {
-        b.iter(|| pc_workload(&RTMALLOC_PERCPU, npairs, ops_per_producer))
-    });
-    group.bench_function("rt_std", |b| {
-        b.iter(|| pc_workload(&RTMALLOC_STD, npairs, ops_per_producer))
-    });
-    group.bench_function("rt_nostd", |b| {
-        b.iter(|| pc_workload(&RTMALLOC_NOSTD, npairs, ops_per_producer))
-    });
-    #[cfg(feature = "mimalloc")]
-    group.bench_function("mimalloc", |b| {
-        b.iter(|| pc_workload(&MIMALLOC, npairs, ops_per_producer))
-    });
-    #[cfg(has_google_tcmalloc)]
-    group.bench_function("google_tc", |b| {
-        b.iter(|| pc_workload(&GOOGLE_TC, npairs, ops_per_producer))
-    });
-    #[cfg(feature = "snmalloc")]
-    group.bench_function("snmalloc", |b| {
-        b.iter(|| pc_workload(&SNMALLOC, npairs, ops_per_producer))
-    });
-    #[cfg(feature = "rpmalloc")]
-    group.bench_function("rpmalloc", |b| {
-        b.iter(|| pc_workload(&RPMALLOC, npairs, ops_per_producer))
-    });
-    #[cfg(all(has_jemalloc, feature = "jemalloc"))]
-    group.bench_function("jemalloc", |b| {
-        b.iter(|| pc_workload(&JEMALLOC, npairs, ops_per_producer))
-    });
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Cache-line false sharing (mimalloc-bench's "cache-scratch")
+// ---------------------------------------------------------------------------
+
+fn bench_cache_scratch(c: &mut Criterion) {
+    let mut group = c.benchmark_group("cache_scratch");
+    let iters_per_thread = 1_000_000usize;
+
+    fn cache_scratch_workload<A: GlobalAlloc + Sync>(
+        allocator: &'static A,
+        nthreads: usize,
+        iters: usize,
+    ) {
+        use std::sync::Arc;
+        use std::sync::Barrier;
+
+        let layout = Layout::from_size_align(64, 8).unwrap();
+        let barrier = Arc::new(Barrier::new(nthreads));
+
+        let handles: Vec<_> = (0..nthreads)
+            .map(|_| {
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let ptr = unsafe { allocator.alloc(layout) };
+                    assert!(!ptr.is_null());
+                    let p = ptr as *mut u64;
+
+                    barrier.wait();
+
+                    for _ in 0..iters {
+                        unsafe { p.write_volatile(p.read_volatile().wrapping_add(1)) };
+                    }
+
+                    unsafe { allocator.dealloc(ptr, layout) };
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+
+    for &nthreads in &[1usize, 2, 4, 8] {
+        group.throughput(Throughput::Elements((iters_per_thread * nthreads) as u64));
+        bench_all_allocators_static!(group, nthreads, |b, alloc| {
+            b.iter(|| cache_scratch_workload(alloc, nthreads, iters_per_thread))
+        });
+    }
+
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Large allocations (mmap / page-heap path)
+// ---------------------------------------------------------------------------
+
+fn bench_large_alloc(c: &mut Criterion) {
+    let sizes: &[usize] = &[256 * 1024, 1024 * 1024, 4 * 1024 * 1024, 16 * 1024 * 1024];
+    let mut group = c.benchmark_group("large_alloc");
+
+    for &size in sizes {
+        let layout = Layout::from_size_align(size, 8).unwrap();
+        let label = if size >= 1024 * 1024 {
+            format!("{}MB", size / (1024 * 1024))
+        } else {
+            format!("{}KB", size / 1024)
+        };
+        group.throughput(Throughput::Elements(1));
+        bench_all_allocators_param!(group, &label, |b, alloc: &dyn GlobalAlloc| {
+            b.iter(|| unsafe { alloc_dealloc(alloc, layout) })
+        });
+    }
+    group.finish();
+}
+
+// ---------------------------------------------------------------------------
+// Aligned allocations (SIMD / cache-line / page alignment)
+// ---------------------------------------------------------------------------
+
+fn bench_aligned_alloc(c: &mut Criterion) {
+    let aligns: &[(usize, &str)] = &[(16, "16_sse"), (64, "64_cacheline"), (4096, "4096_page")];
+    let size = 256usize;
+    let mut group = c.benchmark_group("aligned_alloc");
+    group.throughput(Throughput::Elements(1));
+
+    for &(align, label) in aligns {
+        let layout = Layout::from_size_align(size, align).unwrap();
+        bench_all_allocators!(group, format!("/{label}"), |b, alloc: &dyn GlobalAlloc| {
+            b.iter(|| unsafe { alloc_dealloc(alloc, layout) })
+        });
+    }
 
     group.finish();
 }
@@ -923,395 +451,16 @@ criterion_group!(
     bench_thread_scalability,
     bench_mixed_sizes,
     bench_producer_consumer,
+    bench_cache_scratch,
+    bench_large_alloc,
+    bench_aligned_alloc,
 );
-
-// ---------------------------------------------------------------------------
-// Colored summary table — reads criterion's saved estimates after benches run
-// ---------------------------------------------------------------------------
-
-mod summary {
-    use std::collections::BTreeMap;
-    use std::path::Path;
-
-    const RESET: &str = "\x1b[0m";
-    const BOLD: &str = "\x1b[1m";
-    const DIM: &str = "\x1b[2m";
-    const WHITE: &str = "\x1b[37m";
-    const GREEN: &str = "\x1b[32m";
-    const CYAN: &str = "\x1b[36m";
-    const YELLOW: &str = "\x1b[33m";
-    const BG_GREEN: &str = "\x1b[42m\x1b[30m";
-
-    const MAGENTA: &str = "\x1b[35m";
-    const RED: &str = "\x1b[31m";
-    const BRIGHT_GREEN: &str = "\x1b[92m";
-    const BRIGHT_BLUE: &str = "\x1b[94m";
-    const BRIGHT_CYAN: &str = "\x1b[96m";
-    const BRIGHT_YELLOW: &str = "\x1b[93m";
-
-    const KNOWN: &[&str] = &[
-        "system",
-        "rt_nightly",
-        "rt_percpu",
-        "rt_std",
-        "rt_nostd",
-        "mimalloc",
-        "google_tc",
-        "jemalloc",
-        "snmalloc",
-        "rpmalloc",
-    ];
-
-    fn color_for(name: &str) -> &'static str {
-        match name {
-            "system" => WHITE,
-            "rt_nightly" => GREEN,
-            "rt_percpu" => BRIGHT_GREEN,
-            "rt_std" => MAGENTA,
-            "rt_nostd" => RED,
-            "mimalloc" => CYAN,
-            "google_tc" => YELLOW,
-            "jemalloc" => BRIGHT_BLUE,
-            "snmalloc" => BRIGHT_CYAN,
-            "rpmalloc" => BRIGHT_YELLOW,
-            _ => WHITE,
-        }
-    }
-
-    fn format_time(ns: f64) -> String {
-        if ns >= 1_000_000.0 {
-            format!("{:>8.2} ms", ns / 1_000_000.0)
-        } else if ns >= 1_000.0 {
-            format!("{:>8.2} us", ns / 1_000.0)
-        } else {
-            format!("{:>8.1} ns", ns)
-        }
-    }
-
-    /// Read the point estimate (median ns) from criterion's saved JSON.
-    fn read_estimate(path: &Path) -> Option<f64> {
-        let data = std::fs::read_to_string(path.join("new").join("estimates.json")).ok()?;
-        // Simple JSON parsing — find "median" -> "point_estimate"
-        let median_pos = data.find("\"median\"")?;
-        let after_median = &data[median_pos..];
-        let pe_pos = after_median.find("\"point_estimate\"")?;
-        let after_pe = &after_median[pe_pos + "\"point_estimate\"".len()..];
-        let colon = after_pe.find(':')?;
-        let after_colon = after_pe[colon + 1..].trim_start();
-        let end = after_colon.find([',', '}'])?;
-        after_colon[..end].trim().parse::<f64>().ok()
-    }
-
-    /// Scan criterion output dir and print colored summary.
-    ///
-    /// Criterion saves estimates as:
-    ///   target/criterion/<group>/<allocator>/<param>/new/estimates.json   (with param)
-    ///   target/criterion/<group>/<allocator>/new/estimates.json           (without param)
-    pub fn print_summary() {
-        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join("target")
-            .join("criterion");
-        if !base.exists() {
-            return;
-        }
-
-        // Collect: group -> param -> allocator -> ns
-        let mut groups: BTreeMap<String, BTreeMap<String, Vec<(String, f64)>>> = BTreeMap::new();
-
-        let Ok(group_dirs) = std::fs::read_dir(&base) else {
-            return;
-        };
-        for group_entry in group_dirs.flatten() {
-            let group_name = group_entry.file_name().to_string_lossy().to_string();
-            if group_name == "report" || !group_entry.path().is_dir() {
-                continue;
-            }
-
-            let Ok(alloc_dirs) = std::fs::read_dir(group_entry.path()) else {
-                continue;
-            };
-            for alloc_entry in alloc_dirs.flatten() {
-                let alloc_name = alloc_entry.file_name().to_string_lossy().to_string();
-                if alloc_name == "report" || !alloc_entry.path().is_dir() {
-                    continue;
-                }
-
-                // Check if this dir has a "new/" subdir directly (no param)
-                if alloc_entry
-                    .path()
-                    .join("new")
-                    .join("estimates.json")
-                    .exists()
-                {
-                    if let Some(ns) = read_estimate(&alloc_entry.path()) {
-                        groups
-                            .entry(group_name.clone())
-                            .or_default()
-                            .entry(String::new())
-                            .or_default()
-                            .push((alloc_name.clone(), ns));
-                    }
-                    continue;
-                }
-
-                // Otherwise, iterate param subdirs: <alloc>/<param>/new/estimates.json
-                let Ok(param_dirs) = std::fs::read_dir(alloc_entry.path()) else {
-                    continue;
-                };
-                for param_entry in param_dirs.flatten() {
-                    let param_name = param_entry.file_name().to_string_lossy().to_string();
-                    if param_name == "report" || !param_entry.path().is_dir() {
-                        continue;
-                    }
-
-                    if let Some(ns) = read_estimate(&param_entry.path()) {
-                        groups
-                            .entry(group_name.clone())
-                            .or_default()
-                            .entry(param_name)
-                            .or_default()
-                            .push((alloc_name.clone(), ns));
-                    }
-                }
-            }
-        }
-
-        if groups.is_empty() {
-            return;
-        }
-
-        let bar_width = 30;
-
-        println!();
-        println!("  {BOLD}========== Benchmark Summary =========={RESET}");
-        println!();
-        print!("  Legend: ");
-        print!("{WHITE}system{RESET}  ");
-        print!("{GREEN}rt_nightly{RESET}  ");
-        print!("{BRIGHT_GREEN}rt_percpu{RESET}  ");
-        print!("{MAGENTA}rt_std{RESET}  ");
-        print!("{RED}rt_nostd{RESET}  ");
-        print!("{CYAN}mimalloc{RESET}  ");
-        print!("{YELLOW}google_tc{RESET}  ");
-        print!("{BRIGHT_BLUE}jemalloc{RESET}  ");
-        print!("{BRIGHT_CYAN}snmalloc{RESET}  ");
-        print!("{BRIGHT_YELLOW}rpmalloc{RESET}");
-        println!();
-
-        for (group, params) in &groups {
-            println!();
-            println!("  {BOLD}{group}{RESET}");
-
-            for (param, results) in params {
-                // Filter to known allocators and sort fastest first
-                let mut results: Vec<_> = results
-                    .iter()
-                    .filter(|(name, _)| KNOWN.contains(&name.as_str()))
-                    .collect();
-                results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-
-                if results.is_empty() {
-                    continue;
-                }
-
-                let label = if param.is_empty() {
-                    String::new()
-                } else {
-                    format!("  size={param}")
-                };
-                println!("  {DIM}---{label}{RESET}");
-
-                let best = results
-                    .iter()
-                    .map(|(_, ns)| *ns)
-                    .fold(f64::INFINITY, f64::min);
-                let worst = results.iter().map(|(_, ns)| *ns).fold(0.0f64, f64::max);
-
-                for (alloc, ns) in results {
-                    let color = color_for(alloc);
-                    let time = format_time(*ns);
-                    let ratio = if worst > 0.0 { ns / worst } else { 1.0 };
-                    let bar_len = ((ratio * bar_width as f64) as usize).max(1);
-                    let bar = "\u{2588}".repeat(bar_len);
-                    let pad = " ".repeat(bar_width - bar_len);
-
-                    let tag = if (*ns - best).abs() < 0.01 {
-                        format!(" {BG_GREEN} BEST {RESET}")
-                    } else {
-                        let slower = *ns / best;
-                        format!(" {DIM}{slower:.2}x{RESET}")
-                    };
-
-                    println!("  {color}{alloc:>12}{RESET}  {time}  {color}{bar}{RESET}{pad}{tag}");
-                }
-            }
-        }
-        println!();
-    }
-
-    /// Hex colors for SVG plots.
-    fn svg_color_for(name: &str) -> &'static str {
-        match name {
-            "system" => "#888888",     // gray
-            "rt_nightly" => "#2ca02c", // green
-            "rt_percpu" => "#98df8a",  // light green
-            "rt_std" => "#9467bd",     // purple
-            "rt_nostd" => "#d62728",   // red
-            "mimalloc" => "#17becf",   // cyan
-            "google_tc" => "#ff7f0e",  // orange
-            "jemalloc" => "#1f77b4",   // blue
-            "snmalloc" => "#e377c2",   // pink
-            "rpmalloc" => "#bcbd22",   // olive
-            _ => "#1f78b4",            // default blue
-        }
-    }
-
-    /// Recolor criterion's violin SVGs so each allocator gets a distinct color.
-    ///
-    /// Violin SVGs have text labels like "group/allocator" at known y positions,
-    /// followed by polygon pairs at those same y positions. We parse the labels
-    /// to find allocator names, then replace fill colors on their polygons.
-    pub fn recolor_svgs() {
-        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .join("target")
-            .join("criterion");
-
-        if !base.exists() {
-            return;
-        }
-
-        // Find all violin.svg files
-        fn visit(dir: &Path, svgs: &mut Vec<std::path::PathBuf>) {
-            let Ok(entries) = std::fs::read_dir(dir) else {
-                return;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    visit(&path, svgs);
-                } else if path.file_name().is_some_and(|n| n == "violin.svg") {
-                    svgs.push(path);
-                }
-            }
-        }
-
-        let mut svgs = Vec::new();
-        visit(&base, &mut svgs);
-
-        for svg_path in &svgs {
-            let Ok(content) = std::fs::read_to_string(svg_path) else {
-                continue;
-            };
-
-            // Parse: find text elements that reference allocator names and their y positions.
-            // Text elements look like: <text x="96" y="148" ...>group/allocator</text>
-            // Each allocator has 2 polygons at that y center.
-            //
-            // Strategy: extract (allocator_name, y_value) pairs from labels,
-            // then for each polygon, check which y-band it belongs to and recolor.
-
-            let mut label_y: Vec<(String, f64)> = Vec::new();
-
-            // Find labels: text elements containing known allocator names
-            let mut pos = 0;
-            while let Some(start) = content[pos..].find("<text ") {
-                let abs_start = pos + start;
-                let Some(end) = content[abs_start..].find("</text>") else {
-                    break;
-                };
-                let tag = &content[abs_start..abs_start + end + 7];
-
-                // Extract y attribute
-                if let Some(y_start) = tag.find(" y=\"") {
-                    let y_str = &tag[y_start + 4..];
-                    if let Some(y_end) = y_str.find('"')
-                        && let Ok(y) = y_str[..y_end].parse::<f64>()
-                    {
-                        // Extract text content (trim whitespace from multi-line SVG)
-                        if let Some(gt) = tag.find('>') {
-                            let text = tag[gt + 1..tag.len() - 7].trim();
-                            // Labels: "group/alloc" or "group/alloc/param"
-                            let parts: Vec<&str> = text.split('/').collect();
-                            if parts.len() >= 2 {
-                                let alloc_part = parts[1];
-                                if KNOWN.contains(&alloc_part) {
-                                    label_y.push((alloc_part.to_string(), y));
-                                }
-                            }
-                        }
-                    }
-                }
-
-                pos = abs_start + end + 7;
-            }
-
-            if label_y.is_empty() {
-                continue;
-            }
-
-            // Now recolor polygons. Each polygon has a y-center that matches a label y.
-            // Replace fill="#1F78B4" with the allocator's color based on y proximity.
-            let mut result = String::with_capacity(content.len());
-            let mut remaining = content.as_str();
-
-            while let Some(poly_start) = remaining.find("<polygon ") {
-                result.push_str(&remaining[..poly_start]);
-                let poly_tag_end = remaining[poly_start..]
-                    .find("/>")
-                    .unwrap_or(remaining.len() - poly_start);
-                let poly_tag = &remaining[poly_start..poly_start + poly_tag_end + 2];
-
-                // Extract first y coordinate from points to determine which allocator
-                let recolored = if let Some(pts_start) = poly_tag.find("points=\"") {
-                    let pts = &poly_tag[pts_start + 8..];
-                    // First point is like "656,148 ..."
-                    let first_y = pts
-                        .split_whitespace()
-                        .next()
-                        .and_then(|p| p.split(',').nth(1))
-                        .and_then(|y| y.parse::<f64>().ok());
-
-                    if let Some(y) = first_y {
-                        // Find closest label
-                        let closest = label_y
-                            .iter()
-                            .min_by(|a, b| (a.1 - y).abs().partial_cmp(&(b.1 - y).abs()).unwrap());
-
-                        if let Some((alloc, _)) = closest {
-                            let new_color = svg_color_for(alloc);
-                            poly_tag
-                                .replace("fill=\"#1F78B4\"", &format!("fill=\"{new_color}\""))
-                                .replace("fill=\"#1f78b4\"", &format!("fill=\"{new_color}\""))
-                        } else {
-                            poly_tag.to_string()
-                        }
-                    } else {
-                        poly_tag.to_string()
-                    }
-                } else {
-                    poly_tag.to_string()
-                };
-
-                result.push_str(&recolored);
-                remaining = &remaining[poly_start + poly_tag_end + 2..];
-            }
-            result.push_str(remaining);
-
-            let _ = std::fs::write(svg_path, result);
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Custom main: run criterion, then print colored summary
 // ---------------------------------------------------------------------------
 
 fn main() {
-    // Run criterion benchmarks (respects CLI args like --bench, filters, etc.)
     let sample_size: usize = std::env::var("BENCH_SAMPLE_SIZE")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -1331,9 +480,6 @@ fn main() {
         .warm_up_time(std::time::Duration::from_secs(warmup_secs))
         .measurement_time(std::time::Duration::from_secs(measure_secs))
         .configure_from_args();
-    // codspeed-criterion-compat's Criterion::default() sets codspeed to None.
-    // We need new_instrumented() for CodSpeed to work, but keep default() for
-    // local runs. Patch the codspeed field when running under codspeed.
     #[cfg(codspeed)]
     let mut criterion = {
         let mut c = Criterion::new_instrumented();
@@ -1353,11 +499,11 @@ fn main() {
     bench_thread_scalability(&mut criterion);
     bench_mixed_sizes(&mut criterion);
     bench_producer_consumer(&mut criterion);
+    bench_cache_scratch(&mut criterion);
+    bench_large_alloc(&mut criterion);
+    bench_aligned_alloc(&mut criterion);
 
-    // Recolor SVG plots so each allocator has a distinct color
     summary::recolor_svgs();
-
-    // Print colored comparison table before criterion's final_summary (which may exit)
     summary::print_summary();
     use std::io::Write;
     let _ = std::io::stdout().flush();
