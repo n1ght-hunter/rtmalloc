@@ -91,7 +91,7 @@ jobs:
             git clone --depth 1 https://github.com/daanx/mimalloc-bench.git
           fi
           cd mimalloc-bench
-          ./build-bench-env.sh bench mi je sn
+          ./build-bench-env.sh bench mi je sn tc
 
       - name: Build rtmalloc shared libraries
         run: |
@@ -110,7 +110,7 @@ jobs:
           rt_std $REPO_ROOT/librtmalloc_std.so
           EOF
 
-          ../../bench.sh --external="$REPO_ROOT/ext.txt" mi je sn allt
+          ../../bench.sh --external="$REPO_ROOT/ext.txt" mi je sn tc allt
 
           cp benchres.csv "$REPO_ROOT/benchres.csv"
 
