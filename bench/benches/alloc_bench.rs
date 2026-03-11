@@ -170,6 +170,8 @@ mod google_tc {
 #[cfg(has_google_tcmalloc)]
 use google_tc::GoogleTcMalloc;
 
+#[cfg(feature = "system")]
+static SYSTEM: System = System;
 static RTMALLOC_NIGHTLY: RtmallocNightly = RtmallocNightly;
 static RTMALLOC_STD: RtmallocStd = RtmallocStd;
 static RTMALLOC_NOSTD: RtmallocNostd = RtmallocNostd;
@@ -246,8 +248,9 @@ fn bench_single_alloc_dealloc(c: &mut Criterion) {
         let layout = Layout::from_size_align(size, 8).unwrap();
         group.throughput(Throughput::Elements(1));
 
+        #[cfg(feature = "system")]
         group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_dealloc(&System, layout) })
+            b.iter(|| unsafe { alloc_dealloc(&SYSTEM, layout) })
         });
         group.bench_with_input(BenchmarkId::new("rt_nightly", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_dealloc(&RTMALLOC_NIGHTLY, layout) })
@@ -295,8 +298,9 @@ fn bench_batch_alloc_free(c: &mut Criterion) {
         let layout = Layout::from_size_align(size, 8).unwrap();
         group.throughput(Throughput::Elements(n as u64));
 
+        #[cfg(feature = "system")]
         group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
-            b.iter(|| unsafe { alloc_n_then_free(&System, layout, n) })
+            b.iter(|| unsafe { alloc_n_then_free(&SYSTEM, layout, n) })
         });
         group.bench_with_input(BenchmarkId::new("rt_nightly", size), &size, |b, _| {
             b.iter(|| unsafe { alloc_n_then_free(&RTMALLOC_NIGHTLY, layout, n) })
@@ -344,8 +348,9 @@ fn bench_churn(c: &mut Criterion) {
         let layout = Layout::from_size_align(size, 8).unwrap();
         group.throughput(Throughput::Elements(rounds as u64 * 10));
 
+        #[cfg(feature = "system")]
         group.bench_with_input(BenchmarkId::new("system", size), &size, |b, _| {
-            b.iter(|| unsafe { churn(&System, layout, rounds) })
+            b.iter(|| unsafe { churn(&SYSTEM, layout, rounds) })
         });
         group.bench_with_input(BenchmarkId::new("rt_nightly", size), &size, |b, _| {
             b.iter(|| unsafe { churn(&RTMALLOC_NIGHTLY, layout, rounds) })
@@ -412,8 +417,9 @@ fn bench_vec_push(c: &mut Criterion) {
         unsafe { allocator.dealloc(ptr, layout) };
     }
 
+    #[cfg(feature = "system")]
     group.bench_function("system", |b| {
-        b.iter(|| simulate_vec_growth(&System, black_box(final_len)))
+        b.iter(|| simulate_vec_growth(&SYSTEM, black_box(final_len)))
     });
     group.bench_function("rt_nightly", |b| {
         b.iter(|| simulate_vec_growth(&RTMALLOC_NIGHTLY, black_box(final_len)))
@@ -486,10 +492,9 @@ fn bench_multithreaded(c: &mut Criterion) {
         }
     }
 
-    static SYS: System = System;
-
+    #[cfg(feature = "system")]
     group.bench_function("system", |b| {
-        b.iter(|| mt_workload(&SYS, nthreads, ops_per_thread))
+        b.iter(|| mt_workload(&SYSTEM, nthreads, ops_per_thread))
     });
     group.bench_function("rt_nightly", |b| {
         b.iter(|| mt_workload(&RTMALLOC_NIGHTLY, nthreads, ops_per_thread))
@@ -582,10 +587,9 @@ fn bench_cross_thread_free(c: &mut Criterion) {
         }
     }
 
-    static SYS2: System = System;
-
+    #[cfg(feature = "system")]
     group.bench_function("system", |b| {
-        b.iter(|| cross_thread_workload(&SYS2, nthreads, ops))
+        b.iter(|| cross_thread_workload(&SYSTEM, nthreads, ops))
     });
     group.bench_function("rt_nightly", |b| {
         b.iter(|| cross_thread_workload(&RTMALLOC_NIGHTLY, nthreads, ops))
@@ -660,13 +664,12 @@ fn bench_thread_scalability(c: &mut Criterion) {
         }
     }
 
-    static SYS3: System = System;
-
     for &nthreads in &[1usize, 2, 4, 8] {
         group.throughput(Throughput::Elements((ops_per_thread * nthreads) as u64));
 
+        #[cfg(feature = "system")]
         group.bench_with_input(BenchmarkId::new("system", nthreads), &nthreads, |b, &nt| {
-            b.iter(|| scale_workload(&SYS3, nt, ops_per_thread))
+            b.iter(|| scale_workload(&SYSTEM, nt, ops_per_thread))
         });
         group.bench_with_input(
             BenchmarkId::new("rt_nightly", nthreads),
@@ -777,8 +780,9 @@ fn bench_mixed_sizes(c: &mut Criterion) {
         }
     }
 
+    #[cfg(feature = "system")]
     group.bench_function("system", |b| {
-        b.iter(|| mixed_workload(&System, black_box(n)))
+        b.iter(|| mixed_workload(&SYSTEM, black_box(n)))
     });
     group.bench_function("rt_nightly", |b| {
         b.iter(|| mixed_workload(&RTMALLOC_NIGHTLY, black_box(n)))
@@ -867,10 +871,9 @@ fn bench_producer_consumer(c: &mut Criterion) {
         }
     }
 
-    static SYS4: System = System;
-
+    #[cfg(feature = "system")]
     group.bench_function("system", |b| {
-        b.iter(|| pc_workload(&SYS4, npairs, ops_per_producer))
+        b.iter(|| pc_workload(&SYSTEM, npairs, ops_per_producer))
     });
     group.bench_function("rt_nightly", |b| {
         b.iter(|| pc_workload(&RTMALLOC_NIGHTLY, npairs, ops_per_producer))

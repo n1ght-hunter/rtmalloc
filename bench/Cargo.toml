@@ -5,7 +5,8 @@ edition = "2024"
 publish = false
 
 [features]
-default = ["mimalloc", "snmalloc", "rpmalloc", "jemalloc"]
+default = ["system", "mimalloc", "snmalloc", "rpmalloc", "jemalloc"]
+system = []
 mimalloc = ["dep:mimalloc"]
 snmalloc = ["dep:snmalloc-rs"]
 rpmalloc = ["dep:rpmalloc"]
