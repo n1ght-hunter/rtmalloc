@@ -2,6 +2,5 @@ target
 *.local.*
 *.log
 book/book/
-book/src/_generated/*.md
-book/src/_generated/*.svg
+book/src/_generated/
 !book/src/_generated/.gitkeep

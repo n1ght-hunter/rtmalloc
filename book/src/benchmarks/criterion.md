@@ -2,4 +2,10 @@
 
 Latest allocator comparison from the main branch.
 
-{{#include ../_generated/criterion-charts.md}}
+```uplot
+{"data": "../_generated/criterion/single_alloc_dealloc.json"}
+```
+
+```uplot
+{"data": "../_generated/criterion/batch_1000.json"}
+```

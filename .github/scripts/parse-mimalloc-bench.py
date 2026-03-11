@@ -220,6 +220,46 @@ def generate_bmf_json(groups, output_path, base_suffix=None):
     print(f"Wrote {len(bmf)} BMF entries to {output_path}")
 
 
+def generate_chart_json(groups, output_dir, base_suffix="_base"):
+    """Generate per-benchmark JSON files for mdbook-uplot interactive charts.
+
+    Each file follows the mdbook_uplot format:
+    { title, labels, datasets: [{label, data, color}], axes: {x, y} }
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    for bench, alloc_map in sorted(groups.items()):
+        allocs = sorted(
+            name for name in alloc_map
+            if not name.endswith(base_suffix)
+        )
+        if not allocs:
+            continue
+
+        labels = [alloc_map[a].get("allocator", a) for a in allocs]
+        datasets = []
+        for a in allocs:
+            row = alloc_map[a]
+            datasets.append({
+                "label": a,
+                "color": ALLOCATOR_COLORS.get(a, "#aaaaaa"),
+                "data": [round(row["elapsed"], 3)],
+            })
+
+        chart = {
+            "title": bench,
+            "labels": labels,
+            "datasets": datasets,
+            "axes": {"x": "Allocator", "y": "Time (s)"},
+        }
+
+        path = os.path.join(output_dir, f"{bench}.json")
+        with open(path, "w") as f:
+            json.dump(chart, f, indent=2)
+
+    print(f"Wrote chart JSON files to {output_dir}")
+
+
 def generate_charts(groups, output_dir, output_md=None):
     """Generate SVG bar charts comparing allocators per benchmark."""
     if not HAS_MATPLOTLIB:
@@ -292,6 +332,7 @@ def main():
     parser.add_argument("--output-bmf", help="Write Bencher Metric Format JSON to this file (bencher.dev)")
     parser.add_argument("--output-charts", help="Write SVG charts to this directory")
     parser.add_argument("--output-md", help="Write markdown fragment listing chart SVGs (for mdBook)")
+    parser.add_argument("--output-chart-json", help="Write uPlot chart JSON to this file (for mdbook-uplot)")
     args = parser.parse_args()
 
     rows = parse_csv(args.csv)
@@ -310,6 +351,9 @@ def main():
 
     if args.output_bmf:
         generate_bmf_json(groups, args.output_bmf, base_suffix=args.base_prefix)
+
+    if args.output_chart_json:
+        generate_chart_json(groups, args.output_chart_json, base_suffix=args.base_prefix)
 
     if args.output_charts:
         generate_charts(groups, args.output_charts, output_md=args.output_md)

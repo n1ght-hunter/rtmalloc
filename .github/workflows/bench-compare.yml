@@ -70,13 +70,11 @@ jobs:
 
       - uses: astral-sh/setup-uv@v5
 
-      - name: Generate criterion charts
+      - name: Generate criterion chart data
         run: |
-          mkdir -p book/src/_generated/criterion
           uv run .github/scripts/extract-criterion.py \
             --head target/criterion \
-            --output-charts book/src/_generated/criterion \
-            --output-md book/src/_generated/criterion-charts.md
+            --output-chart-json book/src/_generated/criterion
 
       # --- mimalloc-bench (all allocators via LD_PRELOAD) ---
 
@@ -114,29 +112,16 @@ jobs:
 
           cp benchres.csv "$REPO_ROOT/benchres.csv"
 
-      - name: Generate mimalloc-bench charts
+      - name: Generate mimalloc-bench chart data
         run: |
-          mkdir -p book/src/_generated/mimalloc-bench
           uv run .github/scripts/parse-mimalloc-bench.py \
             --csv benchres.csv \
-            --output-charts book/src/_generated/mimalloc-bench \
-            --output-md book/src/_generated/mimalloc-bench-charts.md
+            --output-chart-json book/src/_generated/mimalloc-bench
 
       # --- Build and deploy mdBook site ---
 
-      - name: Ensure chart fragments exist
-        run: |
-          [ -f book/src/_generated/criterion-charts.md ] || echo "*Charts not yet available.*" > book/src/_generated/criterion-charts.md
-          [ -f book/src/_generated/mimalloc-bench-charts.md ] || echo "*Charts not yet available.*" > book/src/_generated/mimalloc-bench-charts.md
-
       - name: Build mdBook
-        run: mdbook build book
-
-      - name: Copy chart assets into book output
-        run: |
-          mkdir -p book/book/benchmarks
-          cp book/src/_generated/criterion/*.svg book/book/benchmarks/ 2>/dev/null || true
-          cp book/src/_generated/mimalloc-bench/*.svg book/book/benchmarks/ 2>/dev/null || true
+        run: mise x -- mdbook build book
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4

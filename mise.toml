@@ -1,4 +1,5 @@
 [tools]
 cmake = "latest"
 mdbook = "latest"
+"github:n1ght-hunter/mdbook_uplot" = "latest"
 "github:CodSpeedHQ/codspeed-rust" = { version = "v4.3.0", os = ["linux"] }
