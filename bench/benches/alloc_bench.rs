@@ -1,20 +1,10 @@
-//! Allocator benchmarks comparing rtmalloc vs system allocator vs mimalloc vs google tcmalloc.
-//!
-//! Since #[global_allocator] is process-wide and cannot be switched at runtime,
-//! each allocator is tested via its raw GlobalAlloc interface directly.
-//!
-//! rtmalloc is linked as a staticlib (built with --profile fast by build.rs).
-//! After criterion finishes, a colored comparison table is printed.
+//! Allocator benchmarks comparing rtmalloc variants against other allocators.
 #![allow(unexpected_cfgs)]
 
-use criterion::{Criterion, Throughput, criterion_group};
+use criterion::{Criterion, Throughput};
 use rtmalloc_bench::*;
 use std::alloc::{GlobalAlloc, Layout};
 use std::hint::black_box;
-
-// ---------------------------------------------------------------------------
-// Hot-path helpers (kept in bench file for optimal codegen under callgrind)
-// ---------------------------------------------------------------------------
 
 unsafe fn alloc_dealloc(allocator: &dyn GlobalAlloc, layout: Layout) {
     let ptr = unsafe { allocator.alloc(layout) };
@@ -52,10 +42,6 @@ unsafe fn churn(allocator: &dyn GlobalAlloc, layout: Layout, rounds: usize) {
         unsafe { allocator.dealloc(ptr, layout) };
     }
 }
-
-// ---------------------------------------------------------------------------
-// Benchmarks
-// ---------------------------------------------------------------------------
 
 fn bench_single_alloc_dealloc(c: &mut Criterion) {
     let sizes: &[usize] = &[8, 64, 256, 1024, 4096, 65536];
@@ -177,10 +163,6 @@ fn bench_multithreaded(c: &mut Criterion) {
     group.finish();
 }
 
-// ---------------------------------------------------------------------------
-// Cross-thread free (Larson pattern): alloc on thread A, free on thread B
-// ---------------------------------------------------------------------------
-
 fn bench_cross_thread_free(c: &mut Criterion) {
     let mut group = c.benchmark_group("cross_thread_free");
     let ops = 10_000usize;
@@ -231,10 +213,6 @@ fn bench_cross_thread_free(c: &mut Criterion) {
     group.finish();
 }
 
-// ---------------------------------------------------------------------------
-// Thread scalability: same workload at 1, 2, 4, 8 threads
-// ---------------------------------------------------------------------------
-
 fn bench_thread_scalability(c: &mut Criterion) {
     let mut group = c.benchmark_group("thread_scalability");
     let ops_per_thread = 10_000usize;
@@ -276,10 +254,6 @@ fn bench_thread_scalability(c: &mut Criterion) {
 
     group.finish();
 }
-
-// ---------------------------------------------------------------------------
-// Mixed sizes: realistic size distribution (many small, few large)
-// ---------------------------------------------------------------------------
 
 fn bench_mixed_sizes(c: &mut Criterion) {
     let mut group = c.benchmark_group("mixed_sizes");
@@ -333,10 +307,6 @@ fn bench_mixed_sizes(c: &mut Criterion) {
     group.finish();
 }
 
-// ---------------------------------------------------------------------------
-// Producer-consumer: N threads allocate only, N threads free only
-// ---------------------------------------------------------------------------
-
 fn bench_producer_consumer(c: &mut Criterion) {
     let mut group = c.benchmark_group("producer_consumer");
     let ops_per_producer = 10_000usize;
@@ -384,10 +354,6 @@ fn bench_producer_consumer(c: &mut Criterion) {
 
     group.finish();
 }
-
-// ---------------------------------------------------------------------------
-// Cache-line false sharing (mimalloc-bench's "cache-scratch")
-// ---------------------------------------------------------------------------
 
 fn bench_cache_scratch(c: &mut Criterion) {
     let mut group = c.benchmark_group("cache_scratch");
@@ -438,10 +404,6 @@ fn bench_cache_scratch(c: &mut Criterion) {
     group.finish();
 }
 
-// ---------------------------------------------------------------------------
-// Large allocations (mmap / page-heap path)
-// ---------------------------------------------------------------------------
-
 fn bench_large_alloc(c: &mut Criterion) {
     let sizes: &[usize] = &[256 * 1024, 1024 * 1024, 4 * 1024 * 1024, 16 * 1024 * 1024];
     let mut group = c.benchmark_group("large_alloc");
@@ -461,10 +423,6 @@ fn bench_large_alloc(c: &mut Criterion) {
     group.finish();
 }
 
-// ---------------------------------------------------------------------------
-// Aligned allocations (SIMD / cache-line / page alignment)
-// ---------------------------------------------------------------------------
-
 fn bench_aligned_alloc(c: &mut Criterion) {
     let aligns: &[(usize, &str)] = &[(16, "16_sse"), (64, "64_cacheline"), (4096, "4096_page")];
     let size = 256usize;
@@ -481,49 +439,23 @@ fn bench_aligned_alloc(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(
-    benches,
-    bench_single_alloc_dealloc,
-    bench_batch_alloc_free,
-    bench_churn,
-    bench_vec_push,
-    bench_multithreaded,
-    bench_cross_thread_free,
-    bench_thread_scalability,
-    bench_mixed_sizes,
-    bench_producer_consumer,
-    bench_cache_scratch,
-    bench_large_alloc,
-    bench_aligned_alloc,
-);
-
-// ---------------------------------------------------------------------------
-// Custom main: run criterion, then print colored summary
-// ---------------------------------------------------------------------------
+fn env_or<T: std::str::FromStr>(key: &str, default: T) -> T {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
 
 fn main() {
-    let sample_size: usize = std::env::var("BENCH_SAMPLE_SIZE")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(10);
-    let warmup_secs: u64 = std::env::var("BENCH_WARMUP_SECS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1);
-    let measure_secs: u64 = std::env::var("BENCH_MEASURE_SECS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(2);
+    let sample_size: usize = env_or("BENCH_SAMPLE_SIZE", 10);
+    let warmup_secs: u64 = env_or("BENCH_WARMUP_SECS", 1);
+    let measure_secs: u64 = env_or("BENCH_MEASURE_SECS", 2);
 
-    #[allow(unused_mut)]
-    let mut criterion = Criterion::default()
-        .sample_size(sample_size)
-        .warm_up_time(std::time::Duration::from_secs(warmup_secs))
-        .measurement_time(std::time::Duration::from_secs(measure_secs))
-        .configure_from_args();
-    #[cfg(codspeed)]
     let mut criterion = {
+        #[cfg(codspeed)]
         let mut c = Criterion::new_instrumented();
+        #[cfg(not(codspeed))]
+        let mut c = Criterion::default();
         c = c
             .sample_size(sample_size)
             .warm_up_time(std::time::Duration::from_secs(warmup_secs))
@@ -531,6 +463,7 @@ fn main() {
             .configure_from_args();
         c
     };
+
     bench_single_alloc_dealloc(&mut criterion);
     bench_batch_alloc_free(&mut criterion);
     bench_churn(&mut criterion);

@@ -1,9 +1,10 @@
-//! Shared allocator infrastructure for rtmalloc benchmarks.
+//! Allocator benchmark infrastructure.
 //!
-//! Provides FFI bindings, allocator statics, helpers, and the summary/SVG
-//! recolor module used by the benchmark harness.
+//! Provides FFI bindings, allocator statics, macros,
+//! and the summary/SVG recolor module used by the benchmark harness.
 #![allow(unexpected_cfgs)]
 
+#[cfg(feature = "system")]
 use std::alloc::System;
 
 #[cfg(feature = "mimalloc")]
@@ -197,12 +198,10 @@ pub struct SendPtr(pub *mut u8);
 unsafe impl Send for SendPtr {}
 
 // ---------------------------------------------------------------------------
-// Macro to reduce repetitive per-allocator benchmark registration
+// Macros
 // ---------------------------------------------------------------------------
 
 /// Register a benchmark closure for every available allocator.
-///
-/// The closure receives `(b: &mut criterion::Bencher, alloc: &dyn GlobalAlloc)`.
 #[macro_export]
 macro_rules! bench_all_allocators {
     ($group:expr, $suffix:expr, |$b:ident, $alloc:ident| $body:expr) => {{
@@ -287,8 +286,6 @@ macro_rules! bench_all_allocators {
 }
 
 /// Register a parameterised benchmark for every available allocator.
-///
-/// The closure receives `(b: &mut criterion::Bencher, alloc: &dyn GlobalAlloc)`.
 #[macro_export]
 macro_rules! bench_all_allocators_param {
     ($group:expr, $param:expr, |$b:ident, $alloc:ident| $body:expr) => {{
@@ -384,8 +381,6 @@ macro_rules! bench_all_allocators_param {
 
 /// Like `bench_all_allocators_param!` but the closure receives the static allocator
 /// reference with its concrete type (for `Sync + 'static` bounds needed by thread spawning).
-///
-/// The closure body can use `alloc` which is `&'static impl GlobalAlloc + Sync`.
 #[macro_export]
 macro_rules! bench_all_allocators_static {
     ($group:expr, $param:expr, |$b:ident, $alloc:ident| $body:expr) => {{
@@ -545,7 +540,6 @@ pub mod summary {
     /// Read the point estimate (median ns) from criterion's saved JSON.
     fn read_estimate(path: &Path) -> Option<f64> {
         let data = std::fs::read_to_string(path.join("new").join("estimates.json")).ok()?;
-        // Simple JSON parsing — find "median" -> "point_estimate"
         let median_pos = data.find("\"median\"")?;
         let after_median = &data[median_pos..];
         let pe_pos = after_median.find("\"point_estimate\"")?;
@@ -557,10 +551,6 @@ pub mod summary {
     }
 
     /// Scan criterion output dir and print colored summary.
-    ///
-    /// Criterion saves estimates as:
-    ///   target/criterion/<group>/<allocator>/<param>/new/estimates.json   (with param)
-    ///   target/criterion/<group>/<allocator>/new/estimates.json           (without param)
     pub fn print_summary() {
         let base = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -571,7 +561,6 @@ pub mod summary {
             return;
         }
 
-        // Collect: group -> param -> allocator -> ns
         let mut groups: BTreeMap<String, BTreeMap<String, Vec<(String, f64)>>> = BTreeMap::new();
 
         let Ok(group_dirs) = std::fs::read_dir(&base) else {
@@ -592,7 +581,6 @@ pub mod summary {
                     continue;
                 }
 
-                // Check if this dir has a "new/" subdir directly (no param)
                 if alloc_entry
                     .path()
                     .join("new")
@@ -610,7 +598,6 @@ pub mod summary {
                     continue;
                 }
 
-                // Otherwise, iterate param subdirs: <alloc>/<param>/new/estimates.json
                 let Ok(param_dirs) = std::fs::read_dir(alloc_entry.path()) else {
                     continue;
                 };
@@ -659,7 +646,6 @@ pub mod summary {
             println!("  {BOLD}{group}{RESET}");
 
             for (param, results) in params {
-                // Filter to known allocators and sort fastest first
                 let mut results: Vec<_> = results
                     .iter()
                     .filter(|(name, _)| KNOWN.contains(&name.as_str()))
@@ -723,10 +709,6 @@ pub mod summary {
     }
 
     /// Recolor criterion's violin SVGs so each allocator gets a distinct color.
-    ///
-    /// Violin SVGs have text labels like "group/allocator" at known y positions,
-    /// followed by polygon pairs at those same y positions. We parse the labels
-    /// to find allocator names, then replace fill colors on their polygons.
     pub fn recolor_svgs() {
         let base = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -738,7 +720,6 @@ pub mod summary {
             return;
         }
 
-        // Find all violin.svg files
         fn visit(dir: &Path, svgs: &mut Vec<std::path::PathBuf>) {
             let Ok(entries) = std::fs::read_dir(dir) else {
                 return;
@@ -761,16 +742,8 @@ pub mod summary {
                 continue;
             };
 
-            // Parse: find text elements that reference allocator names and their y positions.
-            // Text elements look like: <text x="96" y="148" ...>group/allocator</text>
-            // Each allocator has 2 polygons at that y center.
-            //
-            // Strategy: extract (allocator_name, y_value) pairs from labels,
-            // then for each polygon, check which y-band it belongs to and recolor.
-
             let mut label_y: Vec<(String, f64)> = Vec::new();
 
-            // Find labels: text elements containing known allocator names
             let mut pos = 0;
             while let Some(start) = content[pos..].find("<text ") {
                 let abs_start = pos + start;
@@ -779,22 +752,18 @@ pub mod summary {
                 };
                 let tag = &content[abs_start..abs_start + end + 7];
 
-                // Extract y attribute
                 if let Some(y_start) = tag.find(" y=\"") {
                     let y_str = &tag[y_start + 4..];
                     if let Some(y_end) = y_str.find('"')
                         && let Ok(y) = y_str[..y_end].parse::<f64>()
+                        && let Some(gt) = tag.find('>')
                     {
-                        // Extract text content (trim whitespace from multi-line SVG)
-                        if let Some(gt) = tag.find('>') {
-                            let text = tag[gt + 1..tag.len() - 7].trim();
-                            // Labels: "group/alloc" or "group/alloc/param"
-                            let parts: Vec<&str> = text.split('/').collect();
-                            if parts.len() >= 2 {
-                                let alloc_part = parts[1];
-                                if KNOWN.contains(&alloc_part) {
-                                    label_y.push((alloc_part.to_string(), y));
-                                }
+                        let text = tag[gt + 1..tag.len() - 7].trim();
+                        let parts: Vec<&str> = text.split('/').collect();
+                        if parts.len() >= 2 {
+                            let alloc_part = parts[1];
+                            if KNOWN.contains(&alloc_part) {
+                                label_y.push((alloc_part.to_string(), y));
                             }
                         }
                     }
@@ -807,8 +776,6 @@ pub mod summary {
                 continue;
             }
 
-            // Now recolor polygons. Each polygon has a y-center that matches a label y.
-            // Replace fill="#1F78B4" with the allocator's color based on y proximity.
             let mut result = String::with_capacity(content.len());
             let mut remaining = content.as_str();
 
@@ -819,10 +786,8 @@ pub mod summary {
                     .unwrap_or(remaining.len() - poly_start);
                 let poly_tag = &remaining[poly_start..poly_start + poly_tag_end + 2];
 
-                // Extract first y coordinate from points to determine which allocator
                 let recolored = if let Some(pts_start) = poly_tag.find("points=\"") {
                     let pts = &poly_tag[pts_start + 8..];
-                    // First point is like "656,148 ..."
                     let first_y = pts
                         .split_whitespace()
                         .next()
@@ -830,7 +795,6 @@ pub mod summary {
                         .and_then(|y| y.parse::<f64>().ok());
 
                     if let Some(y) = first_y {
-                        // Find closest label
                         let closest = label_y
                             .iter()
                             .min_by(|a, b| (a.1 - y).abs().partial_cmp(&(b.1 - y).abs()).unwrap());
