@@ -1,0 +1,9 @@
+[book]
+title = "rtmalloc"
+description = "Rust Thread-caching malloc"
+authors = ["n1ght-hunter"]
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/n1ght-hunter/rtmalloc"
+no-section-label = true

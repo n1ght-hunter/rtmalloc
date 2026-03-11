@@ -1,4 +1,10 @@
-#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "matplotlib",
+#     "numpy",
+# ]
+# ///
 """Extract Criterion benchmark results into JSON (for dashboard), Markdown (for PR comments),
 and bar chart SVGs (for visual comparison).
 
@@ -506,7 +512,19 @@ def _generate_index_html(svg_files, output_dir):
         f.write("\n".join(html))
 
 
-def generate_charts(results, output_dir):
+def _generate_index_md(svg_files, output_path):
+    """Generate a markdown fragment listing all chart SVGs."""
+    lines = []
+    for svg in sorted(svg_files):
+        name = svg.replace(".svg", "").replace("_", " ").title()
+        lines.append(f"## {name}\n")
+        lines.append(f"![{name}]({svg})\n")
+
+    with open(output_path, "w") as f:
+        f.write("\n".join(lines))
+
+
+def generate_charts(results, output_dir, output_md=None):
     """Generate grouped bar chart SVGs, one per benchmark group.
 
     Returns list of generated file basenames.
@@ -546,8 +564,11 @@ def generate_charts(results, output_dir):
 
         generated.append(f"{group_name}.svg")
 
-    _generate_index_html(generated, output_dir)
-    generated.append("index.html")
+    if output_md:
+        _generate_index_md(generated, output_md)
+    else:
+        _generate_index_html(generated, output_dir)
+        generated.append("index.html")
 
     return generated
 
@@ -562,6 +583,7 @@ def main():
     parser.add_argument("--output-baseline", help="Output path for baseline JSON (all results, for caching)")
     parser.add_argument("--output-comment", help="Output path for PR comparison Markdown")
     parser.add_argument("--output-charts", help="Output directory for comparison chart SVGs")
+    parser.add_argument("--output-md", help="Output path for markdown fragment listing chart SVGs (for mdBook)")
     args = parser.parse_args()
 
     head_results = scan_criterion_dir(args.head)
@@ -586,7 +608,7 @@ def main():
         print(f"Wrote {len(head_results)} baseline entries to {args.output_baseline}")
 
     if args.output_charts:
-        chart_files = generate_charts(head_results, args.output_charts)
+        chart_files = generate_charts(head_results, args.output_charts, output_md=args.output_md)
         print(f"Generated {len(chart_files)} chart files in {args.output_charts}")
 
     if args.output_comment:

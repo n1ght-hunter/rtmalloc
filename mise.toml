@@ -1,3 +1,4 @@
 [tools]
 cmake = "latest"
-"github:CodSpeedHQ/codspeed-rust" = "v4.3.0"
+mdbook = "latest"
+"github:CodSpeedHQ/codspeed-rust" = { version = "v4.3.0", os = ["linux"] }
