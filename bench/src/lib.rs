@@ -200,6 +200,7 @@ unsafe impl Send for SendPtr {}
 ///
 /// # Safety
 /// Caller must pass a valid allocator and layout.
+#[inline]
 pub unsafe fn alloc_dealloc(allocator: &dyn GlobalAlloc, layout: Layout) {
     let ptr = unsafe { allocator.alloc(layout) };
     assert!(!ptr.is_null());
@@ -210,6 +211,7 @@ pub unsafe fn alloc_dealloc(allocator: &dyn GlobalAlloc, layout: Layout) {
 ///
 /// # Safety
 /// Caller must pass a valid allocator and layout.
+#[inline]
 pub unsafe fn alloc_n_then_free(allocator: &dyn GlobalAlloc, layout: Layout, n: usize) {
     let mut ptrs = Vec::with_capacity(n);
     for _ in 0..n {
@@ -226,6 +228,7 @@ pub unsafe fn alloc_n_then_free(allocator: &dyn GlobalAlloc, layout: Layout, n: 
 ///
 /// # Safety
 /// Caller must pass a valid allocator and layout.
+#[inline]
 pub unsafe fn churn(allocator: &dyn GlobalAlloc, layout: Layout, rounds: usize) {
     let mut live: Vec<*mut u8> = Vec::new();
     for _ in 0..rounds {
