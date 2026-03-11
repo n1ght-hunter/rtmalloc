@@ -1,4 +1,10 @@
-#!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#     "matplotlib",
+#     "numpy",
+# ]
+# ///
 """Parse mimalloc-bench benchres.csv into Markdown comparison tables and/or JSON for gh-pages tracking.
 
 Usage:
@@ -214,7 +220,7 @@ def generate_bmf_json(groups, output_path, base_suffix=None):
     print(f"Wrote {len(bmf)} BMF entries to {output_path}")
 
 
-def generate_charts(groups, output_dir):
+def generate_charts(groups, output_dir, output_md=None):
     """Generate SVG bar charts comparing allocators per benchmark."""
     if not HAS_MATPLOTLIB:
         print("matplotlib not available, skipping charts", file=sys.stderr)
@@ -251,16 +257,27 @@ def generate_charts(groups, output_dir):
         fig.savefig(os.path.join(output_dir, f"{bench}.svg"), format="svg")
         plt.close(fig)
 
-    # Generate index.html
     chart_files = sorted(f for f in os.listdir(output_dir) if f.endswith(".svg"))
-    html = ["<!DOCTYPE html><html><head><title>mimalloc-bench Charts</title></head><body>"]
-    html.append("<h1>mimalloc-bench Charts</h1>")
-    for cf in chart_files:
-        name = cf.replace(".svg", "")
-        html.append(f"<h2>{name}</h2><img src='{cf}' style='max-width:800px'>")
-    html.append("</body></html>")
-    with open(os.path.join(output_dir, "index.html"), "w") as f:
-        f.write("\n".join(html))
+
+    if output_md:
+        # Generate markdown fragment for mdBook
+        lines = []
+        for cf in chart_files:
+            name = cf.replace(".svg", "").replace("_", " ").title()
+            lines.append(f"## {name}\n")
+            lines.append(f"![{name}]({cf})\n")
+        with open(output_md, "w") as f:
+            f.write("\n".join(lines))
+    else:
+        # Generate index.html (legacy)
+        html = ["<!DOCTYPE html><html><head><title>mimalloc-bench Charts</title></head><body>"]
+        html.append("<h1>mimalloc-bench Charts</h1>")
+        for cf in chart_files:
+            name = cf.replace(".svg", "")
+            html.append(f"<h2>{name}</h2><img src='{cf}' style='max-width:800px'>")
+        html.append("</body></html>")
+        with open(os.path.join(output_dir, "index.html"), "w") as f:
+            f.write("\n".join(html))
 
     print(f"Wrote {len(chart_files)} charts to {output_dir}/")
 
@@ -274,6 +291,7 @@ def main():
     parser.add_argument("--output-json", help="Write dashboard JSON to this file (github-action-benchmark format)")
     parser.add_argument("--output-bmf", help="Write Bencher Metric Format JSON to this file (bencher.dev)")
     parser.add_argument("--output-charts", help="Write SVG charts to this directory")
+    parser.add_argument("--output-md", help="Write markdown fragment listing chart SVGs (for mdBook)")
     args = parser.parse_args()
 
     rows = parse_csv(args.csv)
@@ -294,7 +312,7 @@ def main():
         generate_bmf_json(groups, args.output_bmf, base_suffix=args.base_prefix)
 
     if args.output_charts:
-        generate_charts(groups, args.output_charts)
+        generate_charts(groups, args.output_charts, output_md=args.output_md)
 
 
 if __name__ == "__main__":

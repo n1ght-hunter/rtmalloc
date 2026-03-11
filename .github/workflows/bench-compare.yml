@@ -72,9 +72,11 @@ jobs:
 
       - name: Generate criterion charts
         run: |
+          mkdir -p book/src/_generated/criterion
           uv run .github/scripts/extract-criterion.py \
             --head target/criterion \
-            --output-charts site/charts
+            --output-charts book/src/_generated/criterion \
+            --output-md book/src/_generated/criterion-charts.md
 
       # --- mimalloc-bench (all allocators via LD_PRELOAD) ---
 
@@ -114,24 +116,31 @@ jobs:
 
       - name: Generate mimalloc-bench charts
         run: |
+          mkdir -p book/src/_generated/mimalloc-bench
           uv run .github/scripts/parse-mimalloc-bench.py \
             --csv benchres.csv \
-            --output-charts site/mimalloc-bench
+            --output-charts book/src/_generated/mimalloc-bench \
+            --output-md book/src/_generated/mimalloc-bench-charts.md
 
-      # --- Deploy to gh-pages ---
-      # Deploys criterion charts to dev/charts/ and mimalloc-bench charts to dev/mimalloc-bench/.
-      # Uses destination_dir=dev so other top-level gh-pages content (index.html, etc.) is preserved.
+      # --- Build and deploy mdBook site ---
 
-      - name: Prepare deploy directory
+      - name: Ensure chart fragments exist
         run: |
-          mkdir -p deploy
-          mv site/charts deploy/charts
-          mv site/mimalloc-bench deploy/mimalloc-bench
+          [ -f book/src/_generated/criterion-charts.md ] || echo "*Charts not yet available.*" > book/src/_generated/criterion-charts.md
+          [ -f book/src/_generated/mimalloc-bench-charts.md ] || echo "*Charts not yet available.*" > book/src/_generated/mimalloc-bench-charts.md
+
+      - name: Build mdBook
+        run: mdbook build book
+
+      - name: Copy chart assets into book output
+        run: |
+          mkdir -p book/book/benchmarks
+          cp book/src/_generated/criterion/*.svg book/book/benchmarks/ 2>/dev/null || true
+          cp book/src/_generated/mimalloc-bench/*.svg book/book/benchmarks/ 2>/dev/null || true
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./deploy
-          destination_dir: dev
-          keep_files: true
+          publish_dir: ./book/book
+          force_orphan: true
