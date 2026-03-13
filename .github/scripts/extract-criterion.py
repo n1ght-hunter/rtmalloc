@@ -524,14 +524,12 @@ def _generate_index_md(svg_files, output_path):
         f.write("\n".join(lines))
 
 
-def generate_chart_json(results, output_dir):
-    """Generate per-group JSON files for mdbook-uplot interactive charts.
-
-    Each file follows the mdbook_uplot format:
-    { title, labels, datasets: [{label, data, color}], axes: {x, y} }
-    """
-    os.makedirs(output_dir, exist_ok=True)
+def generate_chart_md(results, output_md):
+    """Generate a markdown file with inline uPlot chart JSON per benchmark group."""
     groups = _structure_by_group(results)
+    lines = ["# Criterion Benchmark Charts\n",
+             "Latest allocator comparison from the main branch.\n"]
+    count = 0
 
     for group_name in sorted(groups.keys()):
         param_data = groups[group_name]
@@ -579,11 +577,14 @@ def generate_chart_json(results, output_dir):
             },
         }
 
-        path = os.path.join(output_dir, f"{group_name}.json")
-        with open(path, "w") as f:
-            json.dump(chart, f, indent=2)
+        lines.append("```uplot\n" + json.dumps(chart, indent=2) + "\n```\n")
+        count += 1
 
-    print(f"Wrote chart JSON files to {output_dir}")
+    os.makedirs(os.path.dirname(os.path.abspath(output_md)), exist_ok=True)
+    with open(output_md, "w") as f:
+        f.write("\n".join(lines))
+
+    print(f"Wrote {count} inline charts to {output_md}")
 
 
 def generate_charts(results, output_dir, output_md=None):
@@ -646,7 +647,7 @@ def main():
     parser.add_argument("--output-comment", help="Output path for PR comparison Markdown")
     parser.add_argument("--output-charts", help="Output directory for comparison chart SVGs")
     parser.add_argument("--output-md", help="Output path for markdown fragment listing chart SVGs (for mdBook)")
-    parser.add_argument("--output-chart-json", help="Output directory for uPlot chart JSON files (for mdbook-uplot)")
+    parser.add_argument("--output-chart-md", help="Output markdown file with inline uPlot charts (for mdbook-uplot)")
     args = parser.parse_args()
 
     head_results = scan_criterion_dir(args.head)
@@ -670,8 +671,8 @@ def main():
             json.dump(head_results, f, indent=2)
         print(f"Wrote {len(head_results)} baseline entries to {args.output_baseline}")
 
-    if args.output_chart_json:
-        generate_chart_json(head_results, args.output_chart_json)
+    if args.output_chart_md:
+        generate_chart_md(head_results, args.output_chart_md)
 
     if args.output_charts:
         chart_files = generate_charts(head_results, args.output_charts, output_md=args.output_md)
