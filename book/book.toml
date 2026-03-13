@@ -7,3 +7,13 @@ src = "src"
 [output.html]
 git-repository-url = "https://github.com/n1ght-hunter/rtmalloc"
 no-section-label = true
+additional-js = ["assets/uplot/uplot.min.js", "assets/uplot/uplot-bars.js", "assets/uplot/uplot-init.js"]
+additional-css = ["assets/uplot/uplot.min.css", "assets/uplot/uplot-charts.css"]
+
+[rust]
+edition = "2024"
+
+[preprocessor]
+
+[preprocessor.uplot]
+command = "mdbook-uplot"

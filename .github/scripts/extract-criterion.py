@@ -524,6 +524,68 @@ def _generate_index_md(svg_files, output_path):
         f.write("\n".join(lines))
 
 
+def generate_chart_json(results, output_dir):
+    """Generate per-group JSON files for mdbook-uplot interactive charts.
+
+    Each file follows the mdbook_uplot format:
+    { title, labels, datasets: [{label, data, color}], axes: {x, y} }
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    groups = _structure_by_group(results)
+
+    for group_name in sorted(groups.keys()):
+        param_data = groups[group_name]
+
+        all_allocators = set()
+        for alloc_map in param_data.values():
+            all_allocators.update(alloc_map.keys())
+        allocators = [a for a in ALLOCATOR_ORDER if a in all_allocators]
+
+        if not allocators:
+            continue
+
+        params = sorted(param_data.keys(), key=_param_sort_key)
+
+        all_ns = []
+        for p in params:
+            for a in allocators:
+                v = param_data.get(p, {}).get(a)
+                if v is not None:
+                    all_ns.append(v)
+
+        divisor, unit = _auto_scale_ns(all_ns)
+
+        labels = [str(p) if p is not None else group_name for p in params]
+
+        datasets = []
+        for alloc in allocators:
+            data = []
+            for p in params:
+                v = param_data.get(p, {}).get(alloc)
+                data.append(round(v / divisor, 2) if v is not None else None)
+            datasets.append({
+                "label": ALLOCATOR_LABELS.get(alloc, alloc),
+                "color": ALLOCATOR_COLORS.get(alloc, "#999999"),
+                "data": data,
+            })
+
+        chart = {
+            "title": group_name.replace("_", " ").title(),
+            "labels": labels,
+            "datasets": datasets,
+            "axes": {
+                "x": _x_label_for_group(group_name),
+                "y": f"Time ({unit})",
+            },
+        }
+
+        path = os.path.join(output_dir, f"{group_name}.json")
+        with open(path, "w") as f:
+            json.dump(chart, f, indent=2)
+
+    print(f"Wrote chart JSON files to {output_dir}")
+
+
 def generate_charts(results, output_dir, output_md=None):
     """Generate grouped bar chart SVGs, one per benchmark group.
 
@@ -584,6 +646,7 @@ def main():
     parser.add_argument("--output-comment", help="Output path for PR comparison Markdown")
     parser.add_argument("--output-charts", help="Output directory for comparison chart SVGs")
     parser.add_argument("--output-md", help="Output path for markdown fragment listing chart SVGs (for mdBook)")
+    parser.add_argument("--output-chart-json", help="Output directory for uPlot chart JSON files (for mdbook-uplot)")
     args = parser.parse_args()
 
     head_results = scan_criterion_dir(args.head)
@@ -606,6 +669,9 @@ def main():
         with open(args.output_baseline, "w") as f:
             json.dump(head_results, f, indent=2)
         print(f"Wrote {len(head_results)} baseline entries to {args.output_baseline}")
+
+    if args.output_chart_json:
+        generate_chart_json(head_results, args.output_chart_json)
 
     if args.output_charts:
         chart_files = generate_charts(head_results, args.output_charts, output_md=args.output_md)
