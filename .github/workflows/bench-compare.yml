@@ -74,7 +74,7 @@ jobs:
         run: |
           uv run .github/scripts/extract-criterion.py \
             --head target/criterion \
-            --output-chart-json book/src/_generated/criterion
+            --output-chart-md book/src/benchmarks/criterion.md
 
       # --- mimalloc-bench (all allocators via LD_PRELOAD) ---
 
@@ -116,7 +116,7 @@ jobs:
         run: |
           uv run .github/scripts/parse-mimalloc-bench.py \
             --csv benchres.csv \
-            --output-chart-json book/src/_generated/mimalloc-bench
+            --output-chart-md book/src/benchmarks/mimalloc-bench.md
 
       # --- Build and deploy mdBook site ---
 
