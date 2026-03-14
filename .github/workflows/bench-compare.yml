@@ -63,62 +63,18 @@ jobs:
           key: bench-compare-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: bench-compare-${{ runner.os }}-
 
-      # --- Criterion benchmarks (all allocators) ---
-
-      - name: Run criterion benchmarks
-        run: cargo +nightly bench -p rtmalloc-bench --bench alloc_bench -- --noplot
-
-      - uses: astral-sh/setup-uv@v5
-
-      - name: Generate criterion chart data
-        run: |
-          uv run .github/scripts/extract-criterion.py \
-            --head target/criterion \
-            --output-chart-md book/src/benchmarks/criterion.md
-
-      # --- mimalloc-bench (all allocators via LD_PRELOAD) ---
-
       - uses: actions/cache@v4
         with:
           path: mimalloc-bench
           key: mimalloc-bench-compare-${{ runner.os }}-v1
 
-      - name: Clone and build mimalloc-bench
-        run: |
-          if [ ! -d mimalloc-bench ]; then
-            git clone --depth 1 https://github.com/daanx/mimalloc-bench.git
-          fi
-          cd mimalloc-bench
-          ./build-bench-env.sh bench mi je sn tc
+      - uses: astral-sh/setup-uv@v5
 
-      - name: Build rtmalloc shared libraries
-        run: |
-          cargo +nightly rustc -p rtmalloc --features c-abi,nightly --crate-type cdylib --profile fast
-          cp target/fast/librtmalloc.so librtmalloc_nightly.so
-          cargo +stable rustc -p rtmalloc --features c-abi,std --crate-type cdylib --profile fast
-          cp target/fast/librtmalloc.so librtmalloc_std.so
+      - name: Run criterion benchmarks
+        run: uv run .github/scripts/run-criterion.py --output book/src/benchmarks/criterion.md
 
       - name: Run mimalloc-bench
-        run: |
-          cd mimalloc-bench/out/bench
-
-          REPO_ROOT="${{ github.workspace }}"
-          cat > "$REPO_ROOT/ext.txt" <<EOF
-          rt_nightly $REPO_ROOT/librtmalloc_nightly.so
-          rt_std $REPO_ROOT/librtmalloc_std.so
-          EOF
-
-          ../../bench.sh --external="$REPO_ROOT/ext.txt" mi je sn tc allt
-
-          cp benchres.csv "$REPO_ROOT/benchres.csv"
-
-      - name: Generate mimalloc-bench chart data
-        run: |
-          uv run .github/scripts/parse-mimalloc-bench.py \
-            --csv benchres.csv \
-            --output-chart-md book/src/benchmarks/mimalloc-bench.md
-
-      # --- Build and deploy mdBook site ---
+        run: uv run .github/scripts/run-mimalloc-bench.py --output book/src/benchmarks/mimalloc-bench.md
 
       - name: Build mdBook
         run: mise x -- mdbook build book
