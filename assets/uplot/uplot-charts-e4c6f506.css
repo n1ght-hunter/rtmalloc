@@ -1,0 +1,269 @@
+.uplot-chart {
+  margin: 1.5em 0;
+  width: 100%;
+}
+
+.uplot-group-chart {
+  margin: 1em 0 2em;
+}
+
+.uplot-no-data,
+.uplot-error {
+  padding: 2em;
+  text-align: center;
+  border: 1px dashed var(--sidebar-bg, #ccc);
+  border-radius: 4px;
+}
+
+.uplot-tooltip {
+  position: absolute;
+  z-index: 100;
+  padding: 6px 10px;
+  font-size: 0.85em;
+  line-height: 1.5;
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: nowrap;
+  background: rgba(30, 30, 30, 0.92);
+  color: #eee;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.light .uplot-tooltip,
+.rust .uplot-tooltip {
+  background: rgba(255, 255, 255, 0.95);
+  color: #333;
+  border-color: rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.uplot .u-legend {
+  font-size: 0.85em;
+}
+
+.uplot .u-legend .u-series > * {
+  cursor: pointer;
+}
+
+.uplot-toolbar {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.uplot-toolbar button {
+  padding: 3px 12px;
+  font-size: 0.8em;
+  border: 1px solid var(--sidebar-bg, #ccc);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg, #333);
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.uplot-toolbar button.active {
+  opacity: 1;
+  background: var(--sidebar-bg, #e8e8e8);
+  font-weight: 600;
+}
+
+.uplot-toolbar button:hover {
+  opacity: 1;
+}
+
+.uplot-code-block {
+  background: var(--sidebar-bg, #f5f5f5);
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  border-radius: 4px;
+  padding: 0.5em 1em;
+  overflow: auto;
+  max-height: 500px;
+}
+
+.uplot-chart > details > summary,
+.uplot-side-code > details > summary {
+  cursor: pointer;
+  font-size: 0.85em;
+  padding: 4px 0;
+  opacity: 0.7;
+  user-select: none;
+  list-style: none;
+}
+
+.uplot-chart > details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.uplot-chart > details > summary::before,
+.uplot-side-code > details > summary::before {
+  content: "\25B6  ";
+  font-size: 0.75em;
+}
+
+.uplot-chart > details[open] > summary::before,
+.uplot-side-code > details[open] > summary::before {
+  content: "\25BC  ";
+}
+
+.uplot-chart > details > summary:hover,
+.uplot-side-code > details > summary:hover {
+  opacity: 1;
+}
+
+.uplot-editor-wrap {
+  background: var(--sidebar-bg, #f5f5f5);
+}
+
+.uplot-editor {
+  position: relative;
+  min-height: 4em;
+}
+
+.uplot-editor-highlight,
+.uplot-editor-input {
+  font-family: "Source Code Pro", Consolas, "Ubuntu Mono", Menlo, monospace;
+  font-size: 0.85em;
+  line-height: 1.5;
+  padding: 0.8em 1em;
+  white-space: pre;
+  tab-size: 2;
+  margin: 0;
+  border: 0;
+  overflow-x: auto;
+  word-wrap: normal;
+}
+
+.uplot-editor-highlight {
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  color: var(--fg, #333);
+  background: transparent;
+}
+
+.uplot-editor-input {
+  display: block;
+  position: relative;
+  width: 100%;
+  min-height: 4em;
+  resize: none;
+  color: transparent;
+  caret-color: var(--fg, #333);
+  -webkit-text-fill-color: transparent;
+  background: transparent;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.uplot-editor-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-top: 1px solid rgba(128, 128, 128, 0.15);
+  background: rgba(128, 128, 128, 0.04);
+}
+
+.uplot-editor-status .uplot-edit-error {
+  flex: 1;
+  margin: 0;
+  padding: 2px 4px;
+  font-size: 0.8em;
+  color: #d62728;
+}
+
+.uplot-reset-btn {
+  margin-left: auto;
+  padding: 3px 10px;
+  font-size: 0.8em;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg, #333);
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.uplot-reset-btn:hover {
+  opacity: 1;
+}
+
+.uplot-side {
+  display: flex;
+  gap: 1em;
+  align-items: flex-start;
+}
+
+.uplot-side-chart {
+  flex: 1;
+  min-width: 0;
+}
+
+.uplot-side-code {
+  flex: 0 0 40%;
+  min-width: 0;
+  max-height: 500px;
+  overflow: auto;
+  background: var(--sidebar-bg, #f5f5f5);
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  border-radius: 4px;
+  padding: 0.5em;
+}
+
+@media (max-width: 768px) {
+  .uplot-side {
+    flex-direction: column;
+  }
+  .uplot-side-code {
+    flex: none;
+    width: 100%;
+  }
+}
+
+.uplot-code .jt-node {
+  font-family: "Source Code Pro", Consolas, "Ubuntu Mono", Menlo, monospace;
+  font-size: 0.85em;
+  line-height: 1.6;
+}
+
+.jt-toggle {
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.5;
+}
+
+.jt-toggle:hover {
+  opacity: 1;
+}
+
+.jt-children {
+  padding-left: 1.4em;
+}
+
+.jt-row {
+  white-space: nowrap;
+}
+
+.jt-preview {
+  opacity: 0.4;
+  font-style: italic;
+  font-size: 0.9em;
+}
+
+.jt-key { color: #9467bd; }
+.jt-str { color: #2ca02c; }
+.jt-num { color: #1f77b4; }
+.jt-bool { color: #d62728; }
+.jt-null { color: #888; }
+.jt-bracket { opacity: 0.6; }
+
+.coal .jt-key, .navy .jt-key, .ayu .jt-key { color: #c792ea; }
+.coal .jt-str, .navy .jt-str, .ayu .jt-str { color: #c3e88d; }
+.coal .jt-num, .navy .jt-num, .ayu .jt-num { color: #82aaff; }
+.coal .jt-bool, .navy .jt-bool, .ayu .jt-bool { color: #f07178; }
+.coal .jt-null, .navy .jt-null, .ayu .jt-null { color: #666; }

@@ -1,0 +1,2404 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>rtmalloc</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="Rust Thread-caching malloc">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="favicon-8114d1fc.png">
+        <link rel="stylesheet" href="css/variables-8adf115d.css">
+        <link rel="stylesheet" href="css/general-2459343d.css">
+        <link rel="stylesheet" href="css/chrome-ae938929.css">
+        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="assets/uplot/uplot-df630c6a.min.css">
+        <link rel="stylesheet" href="assets/uplot/uplot-charts-e4c6f506.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex-9216a5b6.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc-eb5f6801.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">rtmalloc</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/n1ght-hunter/rtmalloc" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="rtmalloc-rust-thread-caching-malloc"><a class="header" href="#rtmalloc-rust-thread-caching-malloc">rtmalloc: Rust Thread-caching malloc</a></h1>
+<p><a href="https://codspeed.io/n1ght-hunter/rtmalloc?utm_source=badge"><img src="https://img.shields.io/endpoint?url=https://codspeed.io/badge.json&amp;style=flat-square&amp;label=CodSpeed" alt="CodSpeed"></a></p>
+<h2 id="about"><a class="header" href="#about">About</a></h2>
+<p>rtmalloc is a ground up new malloc written in rust based heavily on tcmalloc.
+The main reasons for this are:</p>
+<ul>
+<li>Having a malloc native to rust requireing no c build tools to compile</li>
+<li>Learning experience of writing a malloc</li>
+<li>Experimenting with new ideas in malloc design following the ideas of pgo(profile guided optimization). tcmalloc already does somthing simliar.</li>
+<li>Wanted a simple malloc for my own language project that I can easily modify and experiment with.</li>
+</ul>
+<h2 id="features"><a class="header" href="#features">Features</a></h2>
+<ul>
+<li>Thread local caching of small allocations using a per thread arena design</li>
+<li>Experimental cpu cache aware allocation design using a per cpu arena design with rseq.</li>
+<li>3 Part design following tcmalloc with frontend(per-thread/cpu), central(global) and backend(page heap) allocators</li>
+</ul>
+<h2 id="roadmap"><a class="header" href="#roadmap">Roadmap</a></h2>
+<ul>
+<li><input disabled="" type="checkbox" checked=""> Implement a basic malloc with a single global arena</li>
+<li><input disabled="" type="checkbox" checked=""> Implement a per thread arena design for small allocations</li>
+<li><input disabled="" type="checkbox"> Implement a per cpu arena design for small allocations using rseq experimental</li>
+<li><input disabled="" type="checkbox"> Benchmark and make sure rtmalloc nightly is within 1% the speed of tcmalloc</li>
+<li><input disabled="" type="checkbox"> Impl profiling with an output to have custom class sizes for better cache performance</li>
+<li><input disabled="" type="checkbox"> Find a way to run Miri without explicit <code>MIRIFLAGS</code> (currently needs <code>-Zmiri-ignore-leaks -Zmiri-permissive-provenance</code> because caching allocators hold memory in free lists and use integer↔pointer casts internally)</li>
+</ul>
+<h2 id="usage"><a class="header" href="#usage">Usage</a></h2>
+<p>Add rtmalloc as a dependency and set it as the global allocator:</p>
+<pre class="playground"><code class="language-rust edition2024"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use rtmalloc::RtMalloc;
+
+#[global_allocator]
+static GLOBAL: RtMalloc = RtMalloc;
+<span class="boring">}</span></code></pre>
+<p>For best performance on nightly Rust, enable the <code>nightly</code> feature for <code>#[thread_local]</code> support:</p>
+<pre><code class="language-toml">[dependencies]
+rtmalloc = { path = ".", features = ["nightly"] }
+</code></pre>
+<h3 id="configuration"><a class="header" href="#configuration">Configuration</a></h3>
+<p>All allocator tuning is done through a single TOML file. By default rtmalloc uses <code>rtmalloc.toml</code> in the crate root. To use a custom config, set the <code>RTMALLOC_CLASSES</code> env var at build time:</p>
+<pre><code class="language-bash">RTMALLOC_CLASSES=my_config.toml cargo build
+</code></pre>
+<p>The config has two sections — <code>[config]</code> for global knobs and <code>[[class]]</code> for size class definitions. All <code>[config]</code> fields are optional and default to sane values:</p>
+<pre><code class="language-toml">[config]
+page_size = 8192           # must be power of 2, &gt;= 4096
+thread_cache_size = 33554432   # 32 MiB total thread cache budget
+max_transfer_slots = 64        # batches cached per size class
+max_pages = 128                # page heap bucket count
+
+# Size classes — listed smallest to largest, must be 8-byte aligned.
+# Each class can optionally specify pages and batch_size.
+[[class]]
+size = 8
+
+[[class]]
+size = 16
+
+# ... up to 63 classes
+</code></pre>
+<p>Alternatively, use the simple shorthand format for auto-tuned classes:</p>
+<pre><code class="language-toml">classes = [8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]
+</code></pre>
+<details>
+<summary><strong>Profiling &amp; Optimising Size Classes</strong></summary>
+<p>rtmalloc ships with a built-in allocation histogram that records every allocation size at runtime. You can use it to generate a custom size class config tuned to your workload.</p>
+<h4 id="1-enable-the-histogram"><a class="header" href="#1-enable-the-histogram">1. Enable the histogram</a></h4>
+<pre><code class="language-toml">[dependencies]
+rtmalloc = { path = ".", features = ["alloc-histogram", "nightly"] }
+</code></pre>
+<h4 id="2-run-your-workload-then-print-the-report"><a class="header" href="#2-run-your-workload-then-print-the-report">2. Run your workload, then print the report</a></h4>
+<pre class="playground"><code class="language-rust edition2024"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// At shutdown or after a representative run:
+rtmalloc::histogram::print_report();
+<span class="boring">}</span></code></pre>
+<p>This prints a bucket-by-bucket breakdown plus a suggested class layout with waste stats and a ready-to-use TOML snippet.</p>
+<h4 id="3-export-a-config-file-directly"><a class="header" href="#3-export-a-config-file-directly">3. Export a config file directly</a></h4>
+<pre class="playground"><code class="language-rust edition2024"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let toml = rtmalloc::histogram::export_toml(64, 0.125);
+std::fs::write("profile_classes.toml", toml).unwrap();
+<span class="boring">}</span></code></pre>
+<h4 id="4-rebuild-with-the-profiled-config"><a class="header" href="#4-rebuild-with-the-profiled-config">4. Rebuild with the profiled config</a></h4>
+<pre><code class="language-bash">RTMALLOC_CLASSES=profile_classes.toml cargo build --release
+</code></pre>
+<p>The <code>optimal_layout</code> algorithm greedily merges adjacent size buckets to minimise internal fragmentation while staying under a waste-per-class threshold (<code>max_waste_pct</code>). This is the same PGO-style feedback loop that tcmalloc uses internally.</p>
+</details>
+<details>
+<summary><strong>Runtime Stats</strong></summary>
+<p>Enable the <code>stats</code> feature to collect allocation/deallocation counters with zero contention (per-thread atomics):</p>
+<pre><code class="language-toml">[dependencies]
+rtmalloc = { path = ".", features = ["stats", "nightly"] }
+</code></pre>
+<p>Stats are recorded via the <code>stat_inc!</code> / <code>stat_add!</code> macros inside the allocator. When the feature is disabled, these compile to nothing.</p>
+</details>
+<h2 id="benchmarks"><a class="header" href="#benchmarks">Benchmarks</a></h2>
+<p>Benchmarks are still in progress, but the goal is to have rtmalloc be within 1% the speed of tcmalloc on a variety of workloads.
+you can run the benchmarks with <code>cargo bench -p rtmalloc_bench</code>
+if you wish for tcmalloc to be included in the benchmarks you can build it with <code>cargo +nightly -Zscript scripts/build_tcmalloc.rs</code></p>
+<h1 id="contributing"><a class="header" href="#contributing">Contributing</a></h1>
+<p>Contributions are welcome! Please open an issue or submit a pull request.</p>
+<h2 id="achnowledgements"><a class="header" href="#achnowledgements">Achnowledgements</a></h2>
+<ul>
+<li>tcmalloc for the design and inspiration of this malloc(https://github.com/gperftools/gperftools)</li>
+</ul>
+<h2 id="license"><a class="header" href="#license">License</a></h2>
+<p>Licensed under either of</p>
+<ul>
+<li>MIT License (LICENSE-MIT or http://opensource.org/licenses/MIT)</li>
+<li>Apache License, Version 2.0 (LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0)
+at your option.</li>
+</ul>
+<p>Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="criterion-benchmark-charts"><a class="header" href="#criterion-benchmark-charts">Criterion Benchmark Charts</a></h1>
+<p>Latest allocator comparison from the main branch.</p>
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "Batch 5000",
+  "labels": [
+    "8",
+    "64",
+    "512",
+    "4096"
+  ],
+  "datasets": [
+    {
+      "label": "system",
+      "color": "#888888",
+      "data": [
+        0.17,
+        0.17,
+        0.16,
+        8.98
+      ]
+    },
+    {
+      "label": "rt (nightly)",
+      "color": "#2ca02c",
+      "data": [
+        0.05,
+        0.05,
+        0.06,
+        0.1
+      ]
+    },
+    {
+      "label": "rt (percpu)",
+      "color": "#98df8a",
+      "data": [
+        0.17,
+        0.17,
+        0.2,
+        0.28
+      ]
+    },
+    {
+      "label": "rt (std)",
+      "color": "#9467bd",
+      "data": [
+        0.05,
+        0.07,
+        0.06,
+        0.11
+      ]
+    },
+    {
+      "label": "rt (nostd)",
+      "color": "#d62728",
+      "data": [
+        0.06,
+        0.07,
+        0.1,
+        0.19
+      ]
+    },
+    {
+      "label": "mimalloc",
+      "color": "#17becf",
+      "data": [
+        0.03,
+        0.04,
+        0.06,
+        0.19
+      ]
+    },
+    {
+      "label": "jemalloc",
+      "color": "#1f77b4",
+      "data": [
+        0.07,
+        0.08,
+        0.19,
+        0.88
+      ]
+    },
+    {
+      "label": "snmalloc",
+      "color": "#e377c2",
+      "data": [
+        0.03,
+        0.04,
+        0.11,
+        0.61
+      ]
+    },
+    {
+      "label": "rpmalloc",
+      "color": "#bcbd22",
+      "data": [
+        0.05,
+        0.05,
+        0.06,
+        0.08
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Allocation size (bytes)",
+    "y": "Time (ms)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "Cache Scratch",
+  "labels": [
+    "1",
+    "2",
+    "4",
+    "8"
+  ],
+  "datasets": [
+    {
+      "label": "system",
+      "color": "#888888",
+      "data": [
+        0.39,
+        0.42,
+        0.67,
+        1.39
+      ]
+    },
+    {
+      "label": "rt (nightly)",
+      "color": "#2ca02c",
+      "data": [
+        0.38,
+        0.42,
+        0.67,
+        1.39
+      ]
+    },
+    {
+      "label": "rt (percpu)",
+      "color": "#98df8a",
+      "data": [
+        0.38,
+        0.42,
+        0.67,
+        1.39
+      ]
+    },
+    {
+      "label": "rt (std)",
+      "color": "#9467bd",
+      "data": [
+        0.38,
+        0.42,
+        0.67,
+        1.39
+      ]
+    },
+    {
+      "label": "rt (nostd)",
+      "color": "#d62728",
+      "data": [
+        0.37,
+        0.42,
+        0.67,
+        1.39
+      ]
+    },
+    {
+      "label": "mimalloc",
+      "color": "#17becf",
+      "data": [
+        0.38,
+        0.43,
+        0.68,
+        1.4
+      ]
+    },
+    {
+      "label": "jemalloc",
+      "color": "#1f77b4",
+      "data": [
+        0.41,
+        0.48,
+        0.75,
+        1.49
+      ]
+    },
+    {
+      "label": "snmalloc",
+      "color": "#e377c2",
+      "data": [
+        0.38,
+        0.43,
+        0.68,
+        1.41
+      ]
+    },
+    {
+      "label": "rpmalloc",
+      "color": "#bcbd22",
+      "data": [
+        0.38,
+        0.42,
+        0.67,
+        1.38
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Parameter",
+    "y": "Time (ms)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "Churn",
+  "labels": [
+    "32",
+    "256",
+    "2048"
+  ],
+  "datasets": [
+    {
+      "label": "system",
+      "color": "#888888",
+      "data": [
+        150.38,
+        191.42,
+        482.87
+      ]
+    },
+    {
+      "label": "rt (nightly)",
+      "color": "#2ca02c",
+      "data": [
+        113.35,
+        113.34,
+        119.63
+      ]
+    },
+    {
+      "label": "rt (percpu)",
+      "color": "#98df8a",
+      "data": [
+        166.98,
+        164.21,
+        157.99
+      ]
+    },
+    {
+      "label": "rt (std)",
+      "color": "#9467bd",
+      "data": [
+        111.3,
+        111.24,
+        116.81
+      ]
+    },
+    {
+      "label": "rt (nostd)",
+      "color": "#d62728",
+      "data": [
+        126.01,
+        126.88,
+        138.44
+      ]
+    },
+    {
+      "label": "mimalloc",
+      "color": "#17becf",
+      "data": [
+        75.22,
+        80.72,
+        167.06
+      ]
+    },
+    {
+      "label": "jemalloc",
+      "color": "#1f77b4",
+      "data": [
+        70.3,
+        71.53,
+        83.16
+      ]
+    },
+    {
+      "label": "snmalloc",
+      "color": "#e377c2",
+      "data": [
+        65.6,
+        66.73,
+        97.49
+      ]
+    },
+    {
+      "label": "rpmalloc",
+      "color": "#bcbd22",
+      "data": [
+        95.83,
+        99.52,
+        106.72
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Allocation size (bytes)",
+    "y": "Time (\u00b5s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "Cross Thread Free",
+  "labels": [
+    "cross_thread_free"
+  ],
+  "datasets": [
+    {
+      "label": "system",
+      "color": "#888888",
+      "data": [
+        2.63
+      ]
+    },
+    {
+      "label": "rt (nightly)",
+      "color": "#2ca02c",
+      "data": [
+        4.25
+      ]
+    },
+    {
+      "label": "rt (percpu)",
+      "color": "#98df8a",
+      "data": [
+        1.47
+      ]
+    },
+    {
+      "label": "rt (std)",
+      "color": "#9467bd",
+      "data": [
+        4.57
+      ]
+    },
+    {
+      "label": "rt (nostd)",
+      "color": "#d62728",
+      "data": [
+        14.21
+      ]
+    },
+    {
+      "label": "mimalloc",
+      "color": "#17becf",
+      "data": [
+        1.35
+      ]
+    },
+    {
+      "label": "jemalloc",
+      "color": "#1f77b4",
+      "data": [
+        2.19
+      ]
+    },
+    {
+      "label": "snmalloc",
+      "color": "#e377c2",
+      "data": [
+        0.98
+      ]
+    },
+    {
+      "label": "rpmalloc",
+      "color": "#bcbd22",
+      "data": [
+        1.05
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Parameter",
+    "y": "Time (ms)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "Large Alloc",
+  "labels": [
+    "16MB",
+    "1MB",
+    "256KB",
+    "4MB"
+  ],
+  "datasets": [
+    {
+      "label": "system",
+      "color": "#888888",
+      "data": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "label": "rt (nightly)",
+      "color": "#2ca02c",
+      "data": [
+        12.17,
+        0.79,
+        0.01,
+        3.07
+      ]
+    },
+    {
+      "label": "rt (percpu)",
+      "color": "#98df8a",
+      "data": [
+        11.73,
+        0.75,
+        0.01,
+        2.91
+      ]
+    },
+    {
+      "label": "rt (std)",
+      "color": "#9467bd",
+      "data": [
+        11.8,
+        0.76,
+        0.01,
+        3.16
+      ]
+    },
+    {
+      "label": "rt (nostd)",
+      "color": "#d62728",
+      "data": [
+        12.99,
+        0.83,
+        0.01,
+        3.23
+      ]
+    },
+    {
+      "label": "mimalloc",
+      "color": "#17becf",
+      "data": [
+        1.17,
+        1.01,
+        1.01,
+        1.03
+      ]
+    },
+    {
+      "label": "jemalloc",
+      "color": "#1f77b4",
+      "data": [
+        1.66,
+        0.2,
+        0.33,
+        0.2
+      ]
+    },
+    {
+      "label": "snmalloc",
+      "color": "#e377c2",
+      "data": [
+        2.86,
+        0.42,
+        0.34,
+        1.98
+      ]
+    },
+    {
+      "label": "rpmalloc",
+      "color": "#bcbd22",
+      "data": [
+        12.38,
+        0.01,
+        0.01,
+        12.34
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Parameter",
+    "y": "Time (\u00b5s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "Mixed Sizes",
+  "labels": [
+    "mixed_sizes"
+  ],
+  "datasets": [
+    {
+      "label": "system",
+      "color": "#888888",
+      "data": [
+        610.4
+      ]
+    },
+    {
+      "label": "rt (nightly)",
+      "color": "#2ca02c",
+      "data": [
+        211.9
+      ]
+    },
+    {
+      "label": "rt (percpu)",
+      "color": "#98df8a",
+      "data": [
+        356.61
+      ]
+    },
+    {
+      "label": "rt (std)",
+      "color": "#9467bd",
+      "data": [
+        220.27
+      ]
+    },
+    {
+      "label": "rt (nostd)",
+      "color": "#d62728",
+      "data": [
+        314.31
+      ]
+    },
+    {
+      "label": "mimalloc",
+      "color": "#17becf",
+      "data": [
+        192.3
+      ]
+    },
+    {
+      "label": "jemalloc",
+      "color": "#1f77b4",
+      "data": [
+        392.87
+      ]
+    },
+    {
+      "label": "snmalloc",
+      "color": "#e377c2",
+      "data": [
+        259.37
+      ]
+    },
+    {
+      "label": "rpmalloc",
+      "color": "#bcbd22",
+      "data": [
+        201.9
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Parameter",
+    "y": "Time (\u00b5s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "Multithread 4T",
+  "labels": [
+    "multithread_4t"
+  ],
+  "datasets": [
+    {
+      "label": "system",
+      "color": "#888888",
+      "data": [
+        0.74
+      ]
+    },
+    {
+      "label": "rt (nightly)",
+      "color": "#2ca02c",
+      "data": [
+        0.55
+      ]
+    },
+    {
+      "label": "rt (percpu)",
+      "color": "#98df8a",
+      "data": [
+        1.19
+      ]
+    },
+    {
+      "label": "rt (std)",
+      "color": "#9467bd",
+      "data": [
+        0.58
+      ]
+    },
+    {
+      "label": "rt (nostd)",
+      "color": "#d62728",
+      "data": [
+        20.59
+      ]
+    },
+    {
+      "label": "mimalloc",
+      "color": "#17becf",
+      "data": [
+        0.4
+      ]
+    },
+    {
+      "label": "jemalloc",
+      "color": "#1f77b4",
+      "data": [
+        0.41
+      ]
+    },
+    {
+      "label": "snmalloc",
+      "color": "#e377c2",
+      "data": [
+        0.33
+      ]
+    },
+    {
+      "label": "rpmalloc",
+      "color": "#bcbd22",
+      "data": [
+        0.54
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Parameter",
+    "y": "Time (ms)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "Producer Consumer",
+  "labels": [
+    "producer_consumer"
+  ],
+  "datasets": [
+    {
+      "label": "system",
+      "color": "#888888",
+      "data": [
+        4.55
+      ]
+    },
+    {
+      "label": "rt (nightly)",
+      "color": "#2ca02c",
+      "data": [
+        2.71
+      ]
+    },
+    {
+      "label": "rt (percpu)",
+      "color": "#98df8a",
+      "data": [
+        1.61
+      ]
+    },
+    {
+      "label": "rt (std)",
+      "color": "#9467bd",
+      "data": [
+        2.46
+      ]
+    },
+    {
+      "label": "rt (nostd)",
+      "color": "#d62728",
+      "data": [
+        4.02
+      ]
+    },
+    {
+      "label": "mimalloc",
+      "color": "#17becf",
+      "data": [
+        1.61
+      ]
+    },
+    {
+      "label": "jemalloc",
+      "color": "#1f77b4",
+      "data": [
+        2.48
+      ]
+    },
+    {
+      "label": "snmalloc",
+      "color": "#e377c2",
+      "data": [
+        1.57
+      ]
+    },
+    {
+      "label": "rpmalloc",
+      "color": "#bcbd22",
+      "data": [
+        1.46
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Parameter",
+    "y": "Time (ms)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "Single Alloc Dealloc",
+  "labels": [
+    "8",
+    "64",
+    "256",
+    "1024",
+    "4096",
+    "65536"
+  ],
+  "datasets": [
+    {
+      "label": "system",
+      "color": "#888888",
+      "data": [
+        0.04,
+        0.04,
+        0.04,
+        0.04,
+        0.04,
+        0.04
+      ]
+    },
+    {
+      "label": "rt (nightly)",
+      "color": "#2ca02c",
+      "data": [
+        8.71,
+        8.72,
+        8.72,
+        11.48,
+        12.07,
+        11.53
+      ]
+    },
+    {
+      "label": "rt (percpu)",
+      "color": "#98df8a",
+      "data": [
+        15.39,
+        15.38,
+        15.45,
+        15.42,
+        14.56,
+        13.15
+      ]
+    },
+    {
+      "label": "rt (std)",
+      "color": "#9467bd",
+      "data": [
+        9.02,
+        16.48,
+        9.03,
+        9.06,
+        9.96,
+        11.84
+      ]
+    },
+    {
+      "label": "rt (nostd)",
+      "color": "#d62728",
+      "data": [
+        10.95,
+        11.0,
+        11.24,
+        11.02,
+        11.68,
+        13.15
+      ]
+    },
+    {
+      "label": "mimalloc",
+      "color": "#17becf",
+      "data": [
+        28.34,
+        28.59,
+        30.69,
+        33.01,
+        41.44,
+        41.42
+      ]
+    },
+    {
+      "label": "jemalloc",
+      "color": "#1f77b4",
+      "data": [
+        4.05,
+        4.09,
+        4.23,
+        5.01,
+        7.36,
+        202.31
+      ]
+    },
+    {
+      "label": "snmalloc",
+      "color": "#e377c2",
+      "data": [
+        4.06,
+        4.11,
+        4.32,
+        4.51,
+        6.1,
+        298.89
+      ]
+    },
+    {
+      "label": "rpmalloc",
+      "color": "#bcbd22",
+      "data": [
+        8.82,
+        8.94,
+        9.05,
+        10.04,
+        11.23,
+        13.69
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Allocation size (bytes)",
+    "y": "Time (ns)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "Thread Scalability",
+  "labels": [
+    "1",
+    "2",
+    "4",
+    "8"
+  ],
+  "datasets": [
+    {
+      "label": "system",
+      "color": "#888888",
+      "data": [
+        0.2,
+        0.25,
+        0.42,
+        0.84
+      ]
+    },
+    {
+      "label": "rt (nightly)",
+      "color": "#2ca02c",
+      "data": [
+        0.18,
+        0.23,
+        0.34,
+        0.7
+      ]
+    },
+    {
+      "label": "rt (percpu)",
+      "color": "#98df8a",
+      "data": [
+        0.39,
+        0.68,
+        0.61,
+        1.18
+      ]
+    },
+    {
+      "label": "rt (std)",
+      "color": "#9467bd",
+      "data": [
+        0.19,
+        0.23,
+        0.35,
+        0.71
+      ]
+    },
+    {
+      "label": "rt (nostd)",
+      "color": "#d62728",
+      "data": [
+        0.19,
+        2.08,
+        10.09,
+        31.94
+      ]
+    },
+    {
+      "label": "mimalloc",
+      "color": "#17becf",
+      "data": [
+        0.14,
+        0.18,
+        0.27,
+        0.53
+      ]
+    },
+    {
+      "label": "jemalloc",
+      "color": "#1f77b4",
+      "data": [
+        0.14,
+        0.19,
+        0.3,
+        0.63
+      ]
+    },
+    {
+      "label": "snmalloc",
+      "color": "#e377c2",
+      "data": [
+        0.12,
+        0.16,
+        0.23,
+        0.47
+      ]
+    },
+    {
+      "label": "rpmalloc",
+      "color": "#bcbd22",
+      "data": [
+        0.17,
+        0.21,
+        0.34,
+        0.67
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Threads",
+    "y": "Time (ms)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "Vec Growth",
+  "labels": [
+    "vec_growth"
+  ],
+  "datasets": [
+    {
+      "label": "system",
+      "color": "#888888",
+      "data": [
+        19.42
+      ]
+    },
+    {
+      "label": "rt (nightly)",
+      "color": "#2ca02c",
+      "data": [
+        29.55
+      ]
+    },
+    {
+      "label": "rt (percpu)",
+      "color": "#98df8a",
+      "data": [
+        29.62
+      ]
+    },
+    {
+      "label": "rt (std)",
+      "color": "#9467bd",
+      "data": [
+        30.97
+      ]
+    },
+    {
+      "label": "rt (nostd)",
+      "color": "#d62728",
+      "data": [
+        30.79
+      ]
+    },
+    {
+      "label": "mimalloc",
+      "color": "#17becf",
+      "data": [
+        31.09
+      ]
+    },
+    {
+      "label": "jemalloc",
+      "color": "#1f77b4",
+      "data": [
+        17.59
+      ]
+    },
+    {
+      "label": "snmalloc",
+      "color": "#e377c2",
+      "data": [
+        31.56
+      ]
+    },
+    {
+      "label": "rpmalloc",
+      "color": "#bcbd22",
+      "data": [
+        29.56
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Parameter",
+    "y": "Time (\u00b5s)"
+  }
+}
+</script></div>
+
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mimalloc-bench-charts"><a class="header" href="#mimalloc-bench-charts">mimalloc-bench Charts</a></h1>
+<p>Real-world program benchmarks from the main branch.</p>
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "alloc-test1",
+  "labels": [
+    "alloc-test1"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        3.3
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        3.29
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        4.24
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        4.27
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        3.27
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        3.3
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "alloc-testN",
+  "labels": [
+    "alloc-testN"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        4.06
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        4.01
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        7.02
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        6.94
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        3.9
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        3.99
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "barnes",
+  "labels": [
+    "barnes"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        3.39
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        3.3
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        3.31
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        3.33
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        3.31
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        3.32
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "cache-scratch1",
+  "labels": [
+    "cache-scratch1"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        1.25
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        1.24
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        1.24
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        1.24
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        1.24
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        1.25
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "cache-scratchN",
+  "labels": [
+    "cache-scratchN"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        0.62
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        0.62
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        0.62
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        0.62
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        0.63
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        0.63
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "cfrac",
+  "labels": [
+    "cfrac"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        4.25
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        4.13
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        7.71
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        8.01
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        4.05
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        4.18
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "espresso",
+  "labels": [
+    "espresso"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        4.55
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        4.45
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        5.1
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        5.13
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        4.36
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        4.39
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "glibc-simple",
+  "labels": [
+    "glibc-simple"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        2.69
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        2.4
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        2.67
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        2.65
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        1.99
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        2.39
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "glibc-thread",
+  "labels": [
+    "glibc-thread"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        4.262
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        4.071
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        17.322
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        18.411
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        3.857
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        4.315
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "gs",
+  "labels": [
+    "gs"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        0.0
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        0.0
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        0.0
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        0.0
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        0.0
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        0.0
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "larsonN-sized",
+  "labels": [
+    "larsonN-sized"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        12.426
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        11.688
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        20.96
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        19.519
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        11.755
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        10.756
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "lua",
+  "labels": [
+    "lua"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        2.27
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        2.19
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        2.37
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        2.39
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        2.15
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        2.28
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "mstressN",
+  "labels": [
+    "mstressN"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        0.43
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        0.17
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        0.22
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        0.21
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        0.18
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        0.2
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "redis",
+  "labels": [
+    "redis"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        1928.0
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        1996.0
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        1928.0
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        1996.0
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        1928.0
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        1932.0
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "rocksdb",
+  "labels": [
+    "rocksdb"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        0.0
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        0.0
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        0.0
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        0.0
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        0.0
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        0.0
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "sh6benchN",
+  "labels": [
+    "sh6benchN"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        0.97
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        0.54
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        10.91
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        11.08
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        0.51
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        0.69
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "sh8benchN",
+  "labels": [
+    "sh8benchN"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        2.95
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        1.41
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        14.11
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        14.86
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        1.43
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        8.95
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div class="uplot-chart"><script type="application/json" class="uplot-data">{
+  "title": "xmalloc-testN",
+  "labels": [
+    "xmalloc-testN"
+  ],
+  "datasets": [
+    {
+      "label": "je",
+      "color": "#1f77b4",
+      "data": [
+        4.289
+      ]
+    },
+    {
+      "label": "mi",
+      "color": "#17becf",
+      "data": [
+        0.92
+      ]
+    },
+    {
+      "label": "rt_nightly",
+      "color": "#2ca02c",
+      "data": [
+        24.6
+      ]
+    },
+    {
+      "label": "rt_std",
+      "color": "#9467bd",
+      "data": [
+        24.901
+      ]
+    },
+    {
+      "label": "sn",
+      "color": "#e377c2",
+      "data": [
+        0.481
+      ]
+    },
+    {
+      "label": "tc",
+      "color": "#ff7f0e",
+      "data": [
+        11.956
+      ]
+    }
+  ],
+  "axes": {
+    "x": "Benchmark",
+    "y": "Time (s)"
+  }
+}
+</script></div>
+
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="performance-tracking"><a class="header" href="#performance-tracking">Performance Tracking</a></h1>
+<p>Benchmark results are tracked on <a href="https://codspeed.io/n1ght-hunter/rtmalloc">CodSpeed</a>.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr-ef4e11c1.min.js"></script>
+        <script src="mark-09e88c2c.min.js"></script>
+        <script src="searcher-c2a407aa.js"></script>
+
+        <script src="clipboard-1626706a.min.js"></script>
+        <script src="highlight-abc7f01d.js"></script>
+        <script src="book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="assets/uplot/uplot-19c8d4c6.min.js"></script>
+        <script src="assets/uplot/uplot-bars-e87c9b6f.js"></script>
+        <script src="assets/uplot/uplot-init-e964ccf8.js"></script>
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+
+    </div>
+    </body>
+</html>
